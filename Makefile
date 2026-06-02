@@ -1,9 +1,8 @@
 GO ?= go
 GOARCH ?= amd64
-CMDS := $(notdir $(wildcard cmd/*))
+CMDS := $(patsubst cmd/%/main.go,%,$(wildcard cmd/*/main.go))
 
 .PHONY: help build-linux build-windows build-all test
-.PHONY: $(CMDS:%=build-linux-%) $(CMDS:%=build-windows-%)
 
 help:
 	@echo "Available targets:"
@@ -12,17 +11,21 @@ help:
 	@echo "  build-all      Build Linux and Windows binaries"
 	@echo "  test           Run all tests"
 
-build-linux: $(CMDS:%=build-linux-%)
-
-build-linux-%:
+build-linux:
+	@test -n "$(CMDS)" || (echo "No commands found under cmd/*/main.go" && exit 1)
 	@mkdir -p bin/linux
-	GOOS=linux GOARCH=$(GOARCH) $(GO) build -o bin/linux/$* ./cmd/$*
+	@for cmd in $(CMDS); do \
+		echo "Building $$cmd for linux"; \
+		GOOS=linux GOARCH=$(GOARCH) $(GO) build -o bin/linux/$$cmd ./cmd/$$cmd || exit $$?; \
+	done
 
-build-windows: $(CMDS:%=build-windows-%)
-
-build-windows-%:
+build-windows:
+	@test -n "$(CMDS)" || (echo "No commands found under cmd/*/main.go" && exit 1)
 	@mkdir -p bin/windows
-	GOOS=windows GOARCH=$(GOARCH) $(GO) build -o bin/windows/$*.exe ./cmd/$*
+	@for cmd in $(CMDS); do \
+		echo "Building $$cmd for windows"; \
+		GOOS=windows GOARCH=$(GOARCH) $(GO) build -o bin/windows/$$cmd.exe ./cmd/$$cmd || exit $$?; \
+	done
 
 build-all: build-linux build-windows
 
