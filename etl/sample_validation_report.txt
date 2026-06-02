@@ -1,0 +1,17 @@
+﻿=== FOCUS Sample Validation Report ===
+CSV: C:\Users\herna\OneDrive\Documentos\kode\work\focus\focus_sample_100000.csv\focus_sample_100000.csv
+Generated: 2026-06-01T00:11:10.433474+00:00
+  source_rows: 100000
+  rows_after_provider_filter: 99317
+  skipped_oracle: 683
+  providers: {'AWS': 94351, 'GCP': 2, 'AZURE': 4964}
+  charge_categories: {'Usage': 99024, 'Credit': 282, 'Tax': 6, 'Purchase': 3, 'usage': 2}
+  commitment_status: {'Used': 242, 'Unused': 1}
+  commitment_types: {'Savings Plan': 229, 'Reservation': 14}
+  distinct_tag_keys: 82
+  top_tag_keys: [('application', 63084), ('environment', 63081), ('business_unit', 63081), ('org', 3871), ('env', 3796), ('CostAllocationTest', 3764), ('CostCenter', 3518), ('Project', 2489), (' org', 1294), ('ComputeType', 855)]
+  estimated_daily_fact_rows: 88373
+  commitment_rows: 243
+
+Dry run complete. Expected commitment rows: 243
+Run focus_dw.sql, then load with --connection, then etl/02_migrate_dims_and_daily.sql
