@@ -121,6 +121,22 @@ func (s *sqliteStore) Validate(ctx context.Context, batchID int64) (ValidationRe
 	return validateBatch(ctx, s.db, batchID)
 }
 
+func (s *sqliteStore) FindCompletedImport(ctx context.Context, sourceFile, focusVersion string) (int64, bool, error) {
+	return findCompletedImport(ctx, s.db, "sqlite", sourceFile, focusVersion)
+}
+
+func (s *sqliteStore) PurgeImport(ctx context.Context, batchID int64) error {
+	return purgeBatch(ctx, s.db, "sqlite", batchID)
+}
+
+func (s *sqliteStore) RebuildAggregates(ctx context.Context) error {
+	return (&etl.Processor{DB: s.db, Dialect: "sqlite"}).RebuildAggregates(ctx)
+}
+
+func (s *sqliteStore) RebuildTags(ctx context.Context) error {
+	return (&etl.Processor{DB: s.db, Dialect: "sqlite"}).RebuildTagsAll(ctx)
+}
+
 func execSQLScript(ctx context.Context, db *sql.DB, script string) error {
 	for _, stmt := range splitSQL(script) {
 		if stmt == "" {

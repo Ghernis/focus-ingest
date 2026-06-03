@@ -46,11 +46,6 @@ func (p *Processor) upsertDimensions(ctx context.Context, tx *sql.Tx, rows []nor
 			return err
 		}
 	}
-	for _, r := range subs {
-		if err := p.upsertSubAccount(ctx, tx, r); err != nil {
-			return err
-		}
-	}
 	for _, r := range services {
 		if err := p.upsertService(ctx, tx, r); err != nil {
 			return err
@@ -76,8 +71,20 @@ func (p *Processor) upsertDimensions(ctx context.Context, tx *sql.Tx, rows []nor
 			return err
 		}
 	}
+	cache, err := p.loadDimCache(ctx, tx)
+	if err != nil {
+		return err
+	}
+	for _, r := range subs {
+		if err := p.upsertSubAccount(ctx, tx, r, cache); err != nil {
+			return err
+		}
+	}
+	if err := p.refreshDimCache(ctx, tx, cache); err != nil {
+		return err
+	}
 	for _, r := range resources {
-		if err := p.upsertResource(ctx, tx, r); err != nil {
+		if err := p.upsertResource(ctx, tx, r, cache); err != nil {
 			return err
 		}
 	}
@@ -108,11 +115,16 @@ func (p *Processor) upsertAccount(ctx context.Context, tx *sql.Tx, r normRow) er
 	return err
 }
 
-func (p *Processor) upsertSubAccount(ctx context.Context, tx *sql.Tx, r normRow) error {
-	accSK, err := p.lookupAccountSK(ctx, tx, r.ProviderCode, focus.PtrStr(r.BillingAccountId))
-	if err != nil {
-		return err
+func (p *Processor) upsertSubAccount(ctx context.Context, tx *sql.Tx, r normRow, cache *dimCache) error {
+	accSK := cache.account[r.ProviderCode+"|"+focus.PtrStr(r.BillingAccountId)]
+	if accSK == 0 {
+		var err error
+		accSK, err = p.lookupAccountSK(ctx, tx, r.ProviderCode, focus.PtrStr(r.BillingAccountId))
+		if err != nil {
+			return err
+		}
 	}
+	var err error
 	if p.Dialect == "sqlite" {
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO dim_sub_account (provider, sub_account_id, sub_account_name, sub_account_type, billing_account_sk)
@@ -260,39 +272,34 @@ func (p *Processor) upsertCapacity(ctx context.Context, tx *sql.Tx, r normRow) e
 	return err
 }
 
-func (p *Processor) upsertResource(ctx context.Context, tx *sql.Tx, r normRow) error {
-	accSK, err := p.lookupAccountSK(ctx, tx, r.ProviderCode, focus.PtrStr(r.BillingAccountId))
-	if err != nil {
-		return err
+func (p *Processor) refreshDimCache(ctx context.Context, tx *sql.Tx, cache *dimCache) error {
+	return p.scanPairs(ctx, tx, `SELECT provider||'|'||sub_account_id, sub_account_sk FROM dim_sub_account`, cache.sub)
+}
+
+func (p *Processor) upsertResource(ctx context.Context, tx *sql.Tx, r normRow, cache *dimCache) error {
+	resKey := r.ProviderCode + "|" + focus.PtrStr(r.ResourceId)
+	if cache.resource[resKey] != 0 {
+		return nil
+	}
+	accSK := cache.account[r.ProviderCode+"|"+focus.PtrStr(r.BillingAccountId)]
+	if accSK == 0 {
+		return nil
 	}
 	var subSK interface{}
 	if r.SubAccountId != nil && strings.TrimSpace(*r.SubAccountId) != "" {
-		sk, err := p.lookupSubAccountSK(ctx, tx, r.ProviderCode, focus.PtrStr(r.SubAccountId))
-		if err != nil {
-			return err
+		if sk := cache.sub[r.ProviderCode+"|"+focus.PtrStr(r.SubAccountId)]; sk != 0 {
+			subSK = sk
 		}
-		subSK = sk
 	}
-	svcSK, err := p.lookupServiceSK(ctx, tx, r.ProviderCode, r.ServiceCode)
-	if err != nil {
-		return err
+	svcSK := cache.service[r.ProviderCode+"|"+r.ServiceCode]
+	if svcSK == 0 {
+		return nil
 	}
 	rtype := focus.PtrStr(r.ResourceType)
 	if rtype == "" {
 		rtype = "UNKNOWN"
 	}
-	var exists int
-	err = tx.QueryRowContext(ctx, p.q(`
-		SELECT COUNT(1) FROM dim_resource
-		WHERE provider = ? AND global_resource_id = ? AND valid_to IS NULL`),
-		r.ProviderCode, focus.PtrStr(r.ResourceId)).Scan(&exists)
-	if err != nil {
-		return err
-	}
-	if exists > 0 {
-		return nil
-	}
-	_, err = tx.ExecContext(ctx, p.q(`
+	if _, err := tx.ExecContext(ctx, p.q(`
 		INSERT INTO dim_resource (provider, global_resource_id, resource_type, account_sk, sub_account_sk, service_sk,
 		  region, name, application, environment, business, cost_center,owner_email, tags_json, valid_from)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
@@ -301,8 +308,17 @@ func (p *Processor) upsertResource(ctx context.Context, tx *sql.Tx, r normRow) e
 		tagFromJSON(r.RawTagsJSON, "Application"), tagFromJSON(r.RawTagsJSON, "Environment"),
 		tagFromJSON(r.RawTagsJSON, "Business"), tagFromJSON(r.RawTagsJSON, "CostCenter"),
 		tagFromJSON(r.RawTagsJSON, "info:support-team-email"),
-		nullStr(r.RawTagsJSON), r.ChargeDate)
-	return err
+		nullStr(r.RawTagsJSON), r.ChargeDate); err != nil {
+		return err
+	}
+	var sk int64
+	if err := tx.QueryRowContext(ctx, p.q(`
+		SELECT resource_sk FROM dim_resource
+		WHERE provider = ? AND global_resource_id = ? AND valid_to IS NULL`),
+		r.ProviderCode, focus.PtrStr(r.ResourceId)).Scan(&sk); err == nil {
+		cache.resource[resKey] = sk
+	}
+	return nil
 }
 
 func (p *Processor) lookupSubAccountSK(ctx context.Context, tx *sql.Tx, provider, subAccountID string) (int64, error) {

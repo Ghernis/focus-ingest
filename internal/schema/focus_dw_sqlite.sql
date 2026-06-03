@@ -566,6 +566,8 @@ CREATE TABLE IF NOT EXISTS agg_savings_summary (
   UNIQUE (month_start, provider, service_sk)
 );
 
+CREATE INDEX IF NOT EXISTS IX_ingestion_batch_source ON dim_ingestion_batch (source_file, focus_version, status);
+CREATE INDEX IF NOT EXISTS IX_fact_cost_daily_batch ON fact_focus_cost_daily (ingestion_batch_id);
 CREATE INDEX IF NOT EXISTS IX_fact_cost_daily_date_account ON fact_focus_cost_daily (charge_date, billing_account_sk);
 CREATE INDEX IF NOT EXISTS IX_fact_cost_daily_billing_period ON fact_focus_cost_daily (billing_period_start, billing_account_sk);
 CREATE INDEX IF NOT EXISTS IX_fact_cost_daily_resource ON fact_focus_cost_daily (resource_sk, charge_date) WHERE resource_sk IS NOT NULL;

@@ -16,15 +16,18 @@ import (
 )
 
 var (
-	useLocal     bool
-	useSQLite    bool
-	sqlitePath   string
-	connection   string
-	focusVersion string
-	batchSize    int
-	batchID      int64
-	skipTags     bool
+	useLocal       bool
+	useSQLite      bool
+	sqlitePath     string
+	connection     string
+	focusVersion   string
+	batchSize      int
+	batchID        int64
+	skipTags       bool
 	skipAggregates bool
+	forceImport    bool
+	rebuildTags    bool
+	rebuildAggs    bool
 )
 
 func main() {
@@ -40,11 +43,13 @@ func main() {
 	root.PersistentFlags().StringVar(&focusVersion, "focus-version", "1.2", "FOCUS export version metadata")
 	root.PersistentFlags().IntVar(&batchSize, "batch-size", 5000, "Parquet read / insert batch size")
 	root.PersistentFlags().Int64Var(&batchID, "batch-id", 0, "Ingestion batch id (validate command)")
-	root.PersistentFlags().BoolVar(&skipTags, "skip-tags", false, "Skip tag bridge (faster local imports)")
-	root.PersistentFlags().BoolVar(&skipAggregates, "skip-aggregates", false, "Skip rebuilding aggregate tables (much faster for first run)")
+	root.PersistentFlags().BoolVar(&skipTags, "skip-tags", false, "Skip tag bridge during import (use rebuild tags after bulk load)")
+	root.PersistentFlags().BoolVar(&skipAggregates, "skip-aggregates", false, "Skip rebuilding aggregate tables during import (use rebuild aggregates after bulk load)")
+	root.PersistentFlags().BoolVar(&forceImport, "force", false, "Re-import a file even if it was already processed successfully")
 
 	root.AddCommand(schemaCmd())
 	root.AddCommand(importCmd())
+	root.AddCommand(rebuildCmd())
 	root.AddCommand(validateCmd())
 
 	if err := root.Execute(); err != nil {
@@ -108,10 +113,27 @@ func importCmd() *cobra.Command {
 
 			for _, path := range args {
 				abs, _ := filepath.Abs(path)
+				sourceFile := filepath.Base(path)
+				if !forceImport {
+					if prevID, found, err := s.FindCompletedImport(ctx, sourceFile, focusVersion); err != nil {
+						return err
+					} else if found {
+						fmt.Printf("Skipping %s (already imported as batch %d; use --force to re-import)\n", abs, prevID)
+						continue
+					}
+				} else if prevID, found, err := s.FindCompletedImport(ctx, sourceFile, focusVersion); err != nil {
+					return err
+				} else if found {
+					fmt.Printf("Purging previous import of %s (batch %d)\n", sourceFile, prevID)
+					if err := s.PurgeImport(ctx, prevID); err != nil {
+						return err
+					}
+				}
+
 				meta := store.BatchMeta{
 					SourceProvider: "MIXED",
 					FocusVersion:   focusVersion,
-					SourceFile:     filepath.Base(path),
+					SourceFile:     sourceFile,
 				}
 				id, err := s.BeginBatch(ctx, meta)
 				if err != nil {
@@ -143,6 +165,53 @@ func importCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func rebuildCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "rebuild",
+		Short: "Rebuild aggregate tables and/or tag bridges after bulk import",
+	}
+	rebuildTags = true
+	rebuildAggs = true
+	cmd.PersistentFlags().BoolVar(&rebuildTags, "tags", true, "Rebuild tag bridges from staging")
+	cmd.PersistentFlags().BoolVar(&rebuildAggs, "aggregates", true, "Rebuild aggregate tables from daily facts")
+
+	run := func(label string, fn func() error) error {
+		t0 := time.Now()
+		if err := fn(); err != nil {
+			return err
+		}
+		fmt.Printf("%s complete in %s\n", label, time.Since(t0).Round(time.Millisecond))
+		return nil
+	}
+
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if !rebuildTags && !rebuildAggs {
+			return fmt.Errorf("nothing to rebuild: enable --tags and/or --aggregates")
+		}
+		s, err := openStore()
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		ctx := cmd.Context()
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		if rebuildAggs {
+			if err := run("Aggregate rebuild", func() error { return s.RebuildAggregates(ctx) }); err != nil {
+				return err
+			}
+		}
+		if rebuildTags {
+			if err := run("Tag bridge rebuild", func() error { return s.RebuildTags(ctx) }); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return cmd
 }
 
 func validateCmd() *cobra.Command {

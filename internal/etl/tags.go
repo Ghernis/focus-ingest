@@ -108,27 +108,52 @@ func (p *Processor) buildTags(ctx context.Context, tx *sql.Tx, batchID int64, ro
 		}
 	}
 
+	tagSKs, err := p.loadTagSKMap(ctx, tx)
+	if err != nil {
+		return err
+	}
+
+	var bridgeStmt *sql.Stmt
+	if p.Dialect == "sqlite" {
+		bridgeStmt, err = tx.PrepareContext(ctx, `INSERT OR IGNORE INTO bridge_cost_tag (cost_daily_id, tag_sk) VALUES (?, ?)`)
+	} else {
+		bridgeStmt, err = tx.PrepareContext(ctx, `
+			IF NOT EXISTS (SELECT 1 FROM bridge_cost_tag WHERE cost_daily_id = @p1 AND tag_sk = @p2)
+			  INSERT INTO bridge_cost_tag (cost_daily_id, tag_sk) VALUES (@p1, @p2)`)
+	}
+	if err != nil {
+		return err
+	}
+	defer bridgeStmt.Close()
+
 	for _, pair := range pairs {
-		var tagSK int64
-		if err := tx.QueryRowContext(ctx, p.q(`SELECT tag_sk FROM dim_tag WHERE tag_key = ? AND tag_value = ?`),
-			pair.Key, pair.Value).Scan(&tagSK); err != nil {
+		tagSK := tagSKs[pair.Key+"\x00"+pair.Value]
+		if tagSK == 0 {
 			continue
 		}
-		if p.Dialect == "sqlite" {
-			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO bridge_cost_tag (cost_daily_id, tag_sk) VALUES (?, ?)`,
-				pair.CostDailyID, tagSK); err != nil {
-				return err
-			}
-		} else {
-			if _, err := tx.ExecContext(ctx, `
-				IF NOT EXISTS (SELECT 1 FROM bridge_cost_tag WHERE cost_daily_id = @p1 AND tag_sk = @p2)
-				  INSERT INTO bridge_cost_tag (cost_daily_id, tag_sk) VALUES (@p1, @p2)`,
-				pair.CostDailyID, tagSK); err != nil {
-				return err
-			}
+		if _, err := bridgeStmt.ExecContext(ctx, pair.CostDailyID, tagSK); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func (p *Processor) loadTagSKMap(ctx context.Context, tx *sql.Tx) (map[string]int64, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT tag_key, tag_value, tag_sk FROM dim_tag`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	m := map[string]int64{}
+	for rows.Next() {
+		var key, val string
+		var sk int64
+		if err := rows.Scan(&key, &val, &sk); err != nil {
+			return nil, err
+		}
+		m[key+"\x00"+val] = sk
+	}
+	return m, rows.Err()
 }
 
 func grainLookupKey(chargeDate string, accSK, subSK, resSK, svcSK, catSK int64, hash, billStart string) string {

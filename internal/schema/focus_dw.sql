@@ -853,6 +853,20 @@ BEGIN
 END
 GO
 
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_ingestion_batch_source' AND object_id = OBJECT_ID(N'dbo.dim_ingestion_batch'))
+BEGIN
+  CREATE INDEX IX_ingestion_batch_source
+    ON dbo.dim_ingestion_batch (source_file, focus_version, status);
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_fact_cost_daily_batch' AND object_id = OBJECT_ID(N'dbo.fact_focus_cost_daily'))
+BEGIN
+  CREATE INDEX IX_fact_cost_daily_batch
+    ON dbo.fact_focus_cost_daily (ingestion_batch_id);
+END
+GO
+
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_fact_cost_daily_date_account' AND object_id = OBJECT_ID(N'dbo.fact_focus_cost_daily'))
 BEGIN
   CREATE INDEX IX_fact_cost_daily_date_account

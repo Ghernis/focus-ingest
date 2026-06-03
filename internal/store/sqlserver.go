@@ -130,3 +130,19 @@ func (s *sqlserverStore) ProcessBatch(ctx context.Context, batchID int64, focusV
 func (s *sqlserverStore) Validate(ctx context.Context, batchID int64) (ValidationReport, error) {
 	return validateBatch(ctx, s.db, batchID)
 }
+
+func (s *sqlserverStore) FindCompletedImport(ctx context.Context, sourceFile, focusVersion string) (int64, bool, error) {
+	return findCompletedImport(ctx, s.db, "sqlserver", sourceFile, focusVersion)
+}
+
+func (s *sqlserverStore) PurgeImport(ctx context.Context, batchID int64) error {
+	return purgeBatch(ctx, s.db, "sqlserver", batchID)
+}
+
+func (s *sqlserverStore) RebuildAggregates(ctx context.Context) error {
+	return (&etl.Processor{DB: s.db, Dialect: "sqlserver"}).RebuildAggregates(ctx)
+}
+
+func (s *sqlserverStore) RebuildTags(ctx context.Context) error {
+	return (&etl.Processor{DB: s.db, Dialect: "sqlserver"}).RebuildTagsAll(ctx)
+}

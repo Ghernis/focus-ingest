@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
-	"fmt"
+	"strings"
 )
 
 func validateBatch(ctx context.Context, db *sql.DB, batchID int64) (ValidationReport, error) {
@@ -80,5 +80,5 @@ func validateBatch(ctx context.Context, db *sql.DB, batchID int64) (ValidationRe
 }
 
 func replaceQ(s string) string {
-	return fmt.Sprintf(s) // placeholder; sqlserver queries inlined above
+	return strings.Replace(s, "?", "@p1", 1)
 }

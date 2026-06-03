@@ -37,6 +37,10 @@ type Store interface {
 	InsertStaging(ctx context.Context, batchID int64, focusVersion, sourceFile string, rows []focus.StagingRow) error
 	ProcessBatch(ctx context.Context, batchID int64, focusVersion string) error
 	Validate(ctx context.Context, batchID int64) (ValidationReport, error)
+	FindCompletedImport(ctx context.Context, sourceFile, focusVersion string) (batchID int64, found bool, err error)
+	PurgeImport(ctx context.Context, batchID int64) error
+	RebuildAggregates(ctx context.Context) error
+	RebuildTags(ctx context.Context) error
 	Close() error
 	Dialect() string
 }

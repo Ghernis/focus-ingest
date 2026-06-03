@@ -171,7 +171,7 @@ func (p *Processor) rollupDaily(ctx context.Context, tx *sql.Tx, batchID int64, 
 			capSK = &id
 		}
 
-		key := fmt.Sprintf("%s|%d|%v|%v|%d|%v|%v|%d|%v|%v|%v|%v|%v|%s|%s",
+		key := fmt.Sprintf("%s|%d|%v|%v|%d|%v|%v|%d|%v|%v|%v|%v|%v|%v|%s|%s",
 			r.ChargeDate, accSK, subSK, resSK, svcSK, skuSK, regSK, catSK, cfSK, pcSK, cmtSK,
 			nullStr(r.CommitmentDiscountStatus), capSK, nullStr(r.CapacityReservationStatus),
 			r.ChargeDescriptionHash, r.BillingPeriodStart)
