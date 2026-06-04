@@ -68,8 +68,20 @@ func (p *Processor) ProcessBatch(ctx context.Context, batchID int64, focusVersio
 	return tx.Commit()
 }
 
+type rowQuerier interface {
+	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
+}
+
 func (p *Processor) loadNormalized(ctx context.Context, batchID int64) ([]normRow, error) {
-	q := p.q(`SELECT
+	return p.loadNormalizedWith(ctx, p.DB, batchID)
+}
+
+func (p *Processor) loadNormalizedTx(ctx context.Context, tx *sql.Tx, batchID int64) ([]normRow, error) {
+	return p.loadNormalizedWith(ctx, tx, batchID)
+}
+
+func (p *Processor) loadNormalizedWith(ctx context.Context, q rowQuerier, batchID int64) ([]normRow, error) {
+	qry := p.q(`SELECT
 		source_provider, BillingAccountId, BillingAccountName, BillingAccountType,
 		SubAccountId, SubAccountName, SubAccountType,
 		Provider, ServiceName, ServiceCategory, ServiceSubcategory,
@@ -84,7 +96,7 @@ func (p *Processor) loadNormalized(ctx context.Context, batchID int64) ([]normRo
 		CapacityReservationId, CapacityReservationStatus
 	FROM stg_focus_cost_line WHERE ingestion_batch_id = ?`)
 
-	rs, err := p.DB.QueryContext(ctx, q, batchID)
+	rs, err := q.QueryContext(ctx, qry, batchID)
 	if err != nil {
 		return nil, err
 	}

@@ -40,7 +40,7 @@ func (p *Processor) RebuildTagsAll(ctx context.Context) error {
 	}
 
 	for _, batchID := range batchIDs {
-		rows, err := p.loadNormalized(ctx, batchID)
+		rows, err := p.loadNormalizedTx(ctx, tx, batchID)
 		if err != nil {
 			return fmt.Errorf("batch %d: %w", batchID, err)
 		}
