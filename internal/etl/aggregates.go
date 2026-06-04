@@ -9,6 +9,8 @@ func (p *Processor) rebuildAggregates(ctx context.Context, tx *sql.Tx) error {
 	tables := []string{
 		"agg_cost_daily", "agg_cost_monthly", "agg_cost_by_tag",
 		"agg_commitment_utilization", "agg_commitment_utilization_daily", "agg_savings_summary",
+		"agg_app_monthly", "agg_app_service_monthly", "agg_app_service_resource_monthly",
+		"agg_cost_distribution_monthly",
 	}
 	for _, t := range tables {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM "+t); err != nil {
@@ -77,9 +79,9 @@ func (p *Processor) rebuildAggregates(ctx context.Context, tx *sql.Tx) error {
 	}
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO agg_cost_by_tag (month_start, provider, tag_key, tag_value, effective_cost, billed_cost, line_count, refreshed_utc)
+		INSERT INTO agg_cost_by_tag (month_start, provider, tag_key, tag_value, billed_cost, effective_cost, line_count, refreshed_utc)
 		SELECT substr(f.charge_date,1,7)||'-01', a.provider, t.tag_key, t.tag_value,
-		  SUM(CAST(f.effective_cost AS REAL)), SUM(CAST(f.billed_cost AS REAL)), SUM(f.line_count), datetime('now')
+		  SUM(CAST(f.billed_cost AS REAL)), SUM(CAST(f.effective_cost AS REAL)), SUM(f.line_count), datetime('now')
 		FROM fact_focus_cost_daily f
 		INNER JOIN dim_account a ON f.billing_account_sk = a.account_sk
 		INNER JOIN bridge_cost_tag b ON b.cost_daily_id = f.cost_daily_id
@@ -87,9 +89,9 @@ func (p *Processor) rebuildAggregates(ctx context.Context, tx *sql.Tx) error {
 		GROUP BY substr(f.charge_date,1,7)||'-01', a.provider, t.tag_key, t.tag_value`); err != nil {
 		if p.Dialect == "sqlserver" {
 			_, err = tx.ExecContext(ctx, `
-				INSERT INTO agg_cost_by_tag (month_start, provider, tag_key, tag_value, effective_cost, billed_cost, line_count, refreshed_utc)
+				INSERT INTO agg_cost_by_tag (month_start, provider, tag_key, tag_value, billed_cost, effective_cost, line_count, refreshed_utc)
 				SELECT DATEFROMPARTS(YEAR(f.charge_date), MONTH(f.charge_date), 1), a.provider, t.tag_key, t.tag_value,
-				  SUM(CAST(f.effective_cost AS DECIMAL(28,10))), SUM(CAST(f.billed_cost AS DECIMAL(28,10))), SUM(f.line_count), SYSUTCDATETIME()
+				  SUM(CAST(f.billed_cost AS DECIMAL(28,10))), SUM(CAST(f.effective_cost AS DECIMAL(28,10))), SUM(f.line_count), SYSUTCDATETIME()
 				FROM fact_focus_cost_daily f
 				INNER JOIN dim_account a ON f.billing_account_sk = a.account_sk
 				INNER JOIN bridge_cost_tag b ON b.cost_daily_id = f.cost_daily_id
@@ -163,7 +165,10 @@ func (p *Processor) rebuildAggregates(ctx context.Context, tx *sql.Tx) error {
 			INNER JOIN dim_account a ON f.billing_account_sk = a.account_sk
 			GROUP BY DATEFROMPARTS(YEAR(f.charge_date), MONTH(f.charge_date), 1), a.provider, f.service_sk`)
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return p.rebuildAppAggregates(ctx, tx)
 }
 
 // satisfy unused import when aggregates only use ctx

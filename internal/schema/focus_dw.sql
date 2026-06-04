@@ -838,6 +838,96 @@ BEGIN
 END
 GO
 
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.agg_app_monthly') AND type = N'U')
+BEGIN
+  CREATE TABLE dbo.agg_app_monthly (
+    agg_app_monthly_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+    month_start        DATE NOT NULL,
+    provider           VARCHAR(10) NOT NULL,
+    application        NVARCHAR(256) NOT NULL,
+    environment        NVARCHAR(128) NOT NULL DEFAULT '(Unknown)',
+    billed_cost        DECIMAL(28,10) NOT NULL DEFAULT 0,
+    effective_cost     DECIMAL(28,10) NOT NULL DEFAULT 0,
+    line_count         INT NOT NULL DEFAULT 0,
+    refreshed_utc      DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    UNIQUE (month_start, provider, application, environment)
+  );
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.agg_app_service_monthly') AND type = N'U')
+BEGIN
+  CREATE TABLE dbo.agg_app_service_monthly (
+    agg_app_service_monthly_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+    month_start                DATE NOT NULL,
+    provider                   VARCHAR(10) NOT NULL,
+    application                NVARCHAR(256) NOT NULL,
+    environment                NVARCHAR(128) NOT NULL DEFAULT '(Unknown)',
+    service_sk                 INT NOT NULL,
+    billed_cost                DECIMAL(28,10) NOT NULL DEFAULT 0,
+    effective_cost             DECIMAL(28,10) NOT NULL DEFAULT 0,
+    line_count                 INT NOT NULL DEFAULT 0,
+    refreshed_utc              DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    UNIQUE (month_start, provider, application, environment, service_sk)
+  );
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.agg_app_service_resource_monthly') AND type = N'U')
+BEGIN
+  CREATE TABLE dbo.agg_app_service_resource_monthly (
+    agg_app_service_resource_monthly_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+    month_start                         DATE NOT NULL,
+    provider                            VARCHAR(10) NOT NULL,
+    application                         NVARCHAR(256) NOT NULL,
+    environment                         NVARCHAR(128) NOT NULL DEFAULT '(Unknown)',
+    service_sk                          INT NOT NULL,
+    resource_sk                         VARCHAR(32) NOT NULL DEFAULT '',
+    billed_cost                         DECIMAL(28,10) NOT NULL DEFAULT 0,
+    effective_cost                      DECIMAL(28,10) NOT NULL DEFAULT 0,
+    line_count                          INT NOT NULL DEFAULT 0,
+    refreshed_utc                       DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    UNIQUE (month_start, provider, application, environment, service_sk, resource_sk)
+  );
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.agg_cost_distribution_monthly') AND type = N'U')
+BEGIN
+  CREATE TABLE dbo.agg_cost_distribution_monthly (
+    agg_cost_distribution_monthly_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+    month_start                      DATE NOT NULL,
+    provider                         VARCHAR(10) NOT NULL,
+    level_name                       VARCHAR(32) NOT NULL,
+    parent_key                       NVARCHAR(512) NULL,
+    entity_count                     INT NOT NULL DEFAULT 0,
+    total_cost                       DECIMAL(28,10) NOT NULL DEFAULT 0,
+    min_cost                         DECIMAL(28,10) NOT NULL DEFAULT 0,
+    p50_cost                         DECIMAL(28,10) NOT NULL DEFAULT 0,
+    p75_cost                         DECIMAL(28,10) NOT NULL DEFAULT 0,
+    p90_cost                         DECIMAL(28,10) NOT NULL DEFAULT 0,
+    p95_cost                         DECIMAL(28,10) NOT NULL DEFAULT 0,
+    p99_cost                         DECIMAL(28,10) NOT NULL DEFAULT 0,
+    max_cost                         DECIMAL(28,10) NOT NULL DEFAULT 0,
+    avg_cost                         DECIMAL(28,10) NOT NULL DEFAULT 0,
+    gini                             DECIMAL(18,8) NOT NULL DEFAULT 0,
+    cr5                              DECIMAL(18,8) NOT NULL DEFAULT 0,
+    cr10                             DECIMAL(18,8) NOT NULL DEFAULT 0,
+    cr20                             DECIMAL(18,8) NOT NULL DEFAULT 0,
+    top_10_cost_pct                  DECIMAL(18,8) NOT NULL DEFAULT 0,
+    tail_80_cost_pct                 DECIMAL(18,8) NOT NULL DEFAULT 0,
+    refreshed_utc                    DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    UNIQUE (month_start, provider, level_name, parent_key)
+  );
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_app_monthly_month' AND object_id = OBJECT_ID(N'dbo.agg_app_monthly'))
+BEGIN
+  CREATE INDEX IX_agg_app_monthly_month ON dbo.agg_app_monthly (month_start, provider, application, environment);
+END
+GO
+
 -- =====================================================================
 -- SECTION 6: FACT INDEXES (columnstore + reporting)
 -- =====================================================================
@@ -902,7 +992,7 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_fact_cost_daily_servi
 BEGIN
   CREATE INDEX IX_fact_cost_daily_service
     ON dbo.fact_focus_cost_daily (service_sk, charge_date)
-    INCLUDE (effective_cost);
+    INCLUDE (billed_cost, effective_cost);
 END
 GO
 
@@ -1051,11 +1141,66 @@ SELECT
     provider,
     tag_key,
     tag_value,
-    effective_cost,
     billed_cost,
+    effective_cost,
     line_count,
     refreshed_utc
 FROM dbo.agg_cost_by_tag;
+GO
+
+CREATE OR ALTER VIEW dbo.vw_pbi_app_monthly AS
+SELECT
+    a.month_start,
+    a.provider,
+    a.application,
+    a.environment,
+    a.billed_cost,
+    a.effective_cost,
+    a.line_count,
+    a.refreshed_utc
+FROM dbo.agg_app_monthly a;
+GO
+
+CREATE OR ALTER VIEW dbo.vw_pbi_app_service_monthly AS
+SELECT
+    a.month_start,
+    a.provider,
+    a.application,
+    a.environment,
+    svc.service_name,
+    svc.service_category,
+    a.billed_cost,
+    a.effective_cost,
+    a.line_count,
+    a.refreshed_utc
+FROM dbo.agg_app_service_monthly a
+INNER JOIN dbo.dim_service svc ON a.service_sk = svc.service_sk;
+GO
+
+CREATE OR ALTER VIEW dbo.vw_pbi_cost_distribution_monthly AS
+SELECT
+    month_start,
+    provider,
+    level_name,
+    parent_key,
+    entity_count,
+    total_cost,
+    min_cost,
+    p50_cost,
+    p75_cost,
+    p90_cost,
+    p95_cost,
+    p99_cost,
+    max_cost,
+    avg_cost,
+    gini,
+    cr5,
+    cr10,
+    cr20,
+    top_10_cost_pct,
+    tail_80_cost_pct,
+    refreshed_utc
+FROM dbo.agg_cost_distribution_monthly;
 GO
 
 CREATE OR ALTER VIEW dbo.vw_pbi_commitment_utilization AS

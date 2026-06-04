@@ -199,13 +199,14 @@ func rebuildCmd() *cobra.Command {
 		if ctx == nil {
 			ctx = context.Background()
 		}
-		if rebuildAggs {
-			if err := run("Aggregate rebuild", func() error { return s.RebuildAggregates(ctx) }); err != nil {
+		// Tags before aggregates so Application/Environment tags feed app-level aggs.
+		if rebuildTags {
+			if err := run("Tag bridge rebuild", func() error { return s.RebuildTags(ctx) }); err != nil {
 				return err
 			}
 		}
-		if rebuildTags {
-			if err := run("Tag bridge rebuild", func() error { return s.RebuildTags(ctx) }); err != nil {
+		if rebuildAggs {
+			if err := run("Aggregate rebuild", func() error { return s.RebuildAggregates(ctx) }); err != nil {
 				return err
 			}
 		}
