@@ -29,6 +29,27 @@ func (p *Processor) RebuildTagsAll(ctx context.Context) error {
 		return fmt.Errorf("no PROCESSED ingestion batches found")
 	}
 
+	// Read staging outside the transaction. With SQLite MaxOpenConns(1), any
+	// p.DB query while a tx holds the sole connection deadlocks database/sql.
+	type batchStaging struct {
+		id   int64
+		rows []normRow
+	}
+	staging := make([]batchStaging, 0, len(batchIDs))
+	for _, batchID := range batchIDs {
+		rows, err := p.loadNormalized(ctx, batchID)
+		if err != nil {
+			return fmt.Errorf("batch %d: %w", batchID, err)
+		}
+		if len(rows) == 0 {
+			continue
+		}
+		staging = append(staging, batchStaging{id: batchID, rows: rows})
+	}
+	if len(staging) == 0 {
+		return fmt.Errorf("no staging rows for PROCESSED batches")
+	}
+
 	tx, err := p.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -39,16 +60,9 @@ func (p *Processor) RebuildTagsAll(ctx context.Context) error {
 		return err
 	}
 
-	for _, batchID := range batchIDs {
-		rows, err := p.loadNormalizedTx(ctx, tx, batchID)
-		if err != nil {
-			return fmt.Errorf("batch %d: %w", batchID, err)
-		}
-		if len(rows) == 0 {
-			continue
-		}
-		if err := p.buildTags(ctx, tx, batchID, rows); err != nil {
-			return fmt.Errorf("batch %d tags: %w", batchID, err)
+	for _, batch := range staging {
+		if err := p.buildTags(ctx, tx, batch.id, batch.rows); err != nil {
+			return fmt.Errorf("batch %d tags: %w", batch.id, err)
 		}
 	}
 	return tx.Commit()

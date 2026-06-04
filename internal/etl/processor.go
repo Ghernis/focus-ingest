@@ -76,10 +76,6 @@ func (p *Processor) loadNormalized(ctx context.Context, batchID int64) ([]normRo
 	return p.loadNormalizedWith(ctx, p.DB, batchID)
 }
 
-func (p *Processor) loadNormalizedTx(ctx context.Context, tx *sql.Tx, batchID int64) ([]normRow, error) {
-	return p.loadNormalizedWith(ctx, tx, batchID)
-}
-
 func (p *Processor) loadNormalizedWith(ctx context.Context, q rowQuerier, batchID int64) ([]normRow, error) {
 	qry := p.q(`SELECT
 		source_provider, BillingAccountId, BillingAccountName, BillingAccountType,
