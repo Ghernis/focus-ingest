@@ -194,8 +194,8 @@ GO
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_dim_resource_sub_account_current' AND object_id = OBJECT_ID(N'dbo.dim_resource'))
 BEGIN
   CREATE INDEX IX_dim_resource_sub_account_current
-    ON dbo.dim_resource (sub_account_sk, is_current)
-    WHERE is_current = 1;
+    ON dbo.dim_resource (sub_account_sk)
+    WHERE valid_to IS NULL;
 END
 GO
 
