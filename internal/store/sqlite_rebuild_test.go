@@ -63,4 +63,57 @@ func TestSQLiteRebuildTags_NoDeadlock(t *testing.T) {
 	}
 }
 
+func TestSQLiteRebuildAggregates_DistributionInsert(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	path := filepath.Join(t.TempDir(), "dw.db")
+	s, err := OpenSQLite(path, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	if err := s.ApplySchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	batchID, err := s.BeginBatch(ctx, BatchMeta{
+		SourceProvider: "aws",
+		FocusVersion:   "1.0",
+		SourceFile:     "test.parquet",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tags := `{"Application":"INS_AZ_OPENIA PRO","Environment":"prod"}`
+	row := focus.StagingRow{
+		SourceProvider:     "aws",
+		Provider:           strPtr("Amazon Web Services"),
+		BillingAccountId:   strPtr("123456789012"),
+		ChargePeriodStart:  strPtr("2024-01-15T00:00:00Z"),
+		ChargePeriodEnd:    strPtr("2024-01-16T00:00:00Z"),
+		BillingPeriodStart: strPtr("2024-01-01"),
+		BillingPeriodEnd:   strPtr("2024-01-31"),
+		ChargeCategory:     strPtr("Usage"),
+		ServiceName:        strPtr("Amazon Elastic Compute Cloud"),
+		BilledCost:         strPtr("10.00"),
+		EffectiveCost:      strPtr("10.00"),
+		RawTagsJSON:        &tags,
+	}
+	if err := s.InsertStaging(ctx, batchID, "1.0", "test.parquet", []focus.StagingRow{row}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ProcessBatch(ctx, batchID, "1.0"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RebuildTags(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RebuildAggregates(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func strPtr(s string) *string { return &s }

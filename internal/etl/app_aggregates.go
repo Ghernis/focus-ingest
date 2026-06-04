@@ -202,7 +202,7 @@ func (p *Processor) rebuildCostDistribution(ctx context.Context, tx *sql.Tx) err
 			month_start, provider, level_name, parent_key,
 			entity_count, total_cost, min_cost, p50_cost, p75_cost, p90_cost, p95_cost, p99_cost,
 			max_cost, avg_cost, gini, cr5, cr10, cr20, top_10_cost_pct, tail_80_cost_pct, refreshed_utc
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))`
 		if p.Dialect == "sqlserver" {
 			q = `INSERT INTO agg_cost_distribution_monthly (
 			month_start, provider, level_name, parent_key,
