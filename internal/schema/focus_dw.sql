@@ -1064,6 +1064,35 @@ BEGIN
 END
 GO
 
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.agg_cost_anomaly_monthly') AND type = N'U')
+BEGIN
+  CREATE TABLE dbo.agg_cost_anomaly_monthly (
+    agg_cost_anomaly_monthly_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+    month_start                 DATE NOT NULL,
+    provider                    VARCHAR(10) NOT NULL,
+    entity_level                VARCHAR(16) NOT NULL,
+    application_sk              INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_application(application_sk),
+    service_sk                  INT NULL,
+    billed_cost_current         DECIMAL(28,10) NOT NULL DEFAULT 0,
+    billed_cost_avg_3m          DECIMAL(28,10) NOT NULL DEFAULT 0,
+    billed_cost_stddev_3m       DECIMAL(28,10) NOT NULL DEFAULT 0,
+    z_score                     DECIMAL(18,8) NOT NULL DEFAULT 0,
+    pct_change_vs_avg           DECIMAL(18,8) NOT NULL DEFAULT 0,
+    history_months              TINYINT NOT NULL DEFAULT 0,
+    anomaly_flag                BIT NOT NULL DEFAULT 0,
+    refreshed_utc               DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    UNIQUE (month_start, provider, entity_level, application_sk, service_sk)
+  );
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_cost_anomaly_month' AND object_id = OBJECT_ID(N'dbo.agg_cost_anomaly_monthly'))
+BEGIN
+  CREATE INDEX IX_agg_cost_anomaly_month ON dbo.agg_cost_anomaly_monthly (month_start, provider, anomaly_flag)
+    INCLUDE (entity_level, application_sk, service_sk, z_score);
+END
+GO
+
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_app_monthly_month' AND object_id = OBJECT_ID(N'dbo.agg_app_monthly'))
 BEGIN
   CREATE INDEX IX_agg_app_monthly_month ON dbo.agg_app_monthly (month_start, provider, application_sk, environment);
@@ -1371,6 +1400,30 @@ SELECT
     tail_80_cost_pct,
     refreshed_utc
 FROM dbo.agg_cost_distribution_monthly;
+GO
+
+CREATE OR ALTER VIEW dbo.vw_pbi_cost_anomaly_monthly AS
+SELECT
+    a.month_start,
+    a.month_start AS billing_period_start,
+    a.provider,
+    a.entity_level,
+    a.application_sk,
+    app.application_name,
+    app.alias_values,
+    a.service_sk,
+    svc.service_name,
+    a.billed_cost_current,
+    a.billed_cost_avg_3m,
+    a.billed_cost_stddev_3m,
+    a.z_score,
+    a.pct_change_vs_avg,
+    a.history_months,
+    a.anomaly_flag,
+    a.refreshed_utc
+FROM dbo.agg_cost_anomaly_monthly a
+INNER JOIN dbo.dim_application app ON a.application_sk = app.application_sk
+LEFT JOIN dbo.dim_service svc ON a.service_sk = svc.service_sk;
 GO
 
 CREATE OR ALTER VIEW dbo.vw_pbi_commitment_utilization AS

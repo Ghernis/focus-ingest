@@ -12,6 +12,7 @@ func (p *Processor) rebuildAggregates(ctx context.Context, tx *sql.Tx) error {
 		"agg_commitment_utilization", "agg_commitment_utilization_daily", "agg_savings_summary",
 		"agg_app_monthly", "agg_app_service_monthly", "agg_app_service_resource_monthly",
 		"agg_cost_distribution_monthly",
+		"agg_cost_anomaly_monthly",
 	}
 	for _, t := range tables {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM "+t); err != nil {

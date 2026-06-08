@@ -10,6 +10,7 @@ Connect Power BI Desktop to Azure SQL using **Import** mode on aggregate views (
 | `vw_pbi_cost_monthly` | Fact (agg) | Executive spend by month |
 | `vw_pbi_cost_daily` | Fact (agg) | Trend / drill-down |
 | `vw_pbi_cost_by_tag` | Fact (agg) | Allocation by application, env, BU |
+| `vw_pbi_cost_anomaly_monthly` | Fact (agg) | App/service spend anomalies vs 3-month baseline |
 | `vw_pbi_commitment_utilization` | Fact (agg) | RI / Savings Plan Used vs Unused |
 | `vw_pbi_savings_summary` | Fact (agg) | Spend vs recommendation savings |
 | `vw_recommendations_summary` | Fact | Rightsizing / optimization detail |

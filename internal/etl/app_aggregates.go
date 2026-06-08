@@ -72,6 +72,7 @@ func (p *Processor) rebuildAppAggregates(ctx context.Context, tx *sql.Tx) error 
 		"agg_app_service_monthly",
 		"agg_app_service_resource_monthly",
 		"agg_cost_distribution_monthly",
+		"agg_cost_anomaly_monthly",
 	}
 	for _, t := range tables {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM "+t); err != nil {
@@ -144,7 +145,10 @@ func (p *Processor) rebuildAppAggregates(ctx context.Context, tx *sql.Tx) error 
 		return fmt.Errorf("agg_app_service_resource_monthly: %w", err)
 	}
 
-	return p.rebuildCostDistribution(ctx, tx)
+	if err := p.rebuildCostDistribution(ctx, tx); err != nil {
+		return err
+	}
+	return p.rebuildCostAnomalies(ctx, tx)
 }
 
 func (p *Processor) rebuildCostDistribution(ctx context.Context, tx *sql.Tx) error {

@@ -651,6 +651,26 @@ CREATE TABLE IF NOT EXISTS agg_cost_distribution_monthly (
   UNIQUE (month_start, provider, level_name, parent_key)
 );
 
+CREATE TABLE IF NOT EXISTS agg_cost_anomaly_monthly (
+  agg_cost_anomaly_monthly_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  month_start                 TEXT NOT NULL,
+  provider                    TEXT NOT NULL,
+  entity_level                TEXT NOT NULL,
+  application_sk              INTEGER NOT NULL REFERENCES dim_application(application_sk),
+  service_sk                  INTEGER NULL,
+  billed_cost_current         TEXT NOT NULL DEFAULT '0',
+  billed_cost_avg_3m          TEXT NOT NULL DEFAULT '0',
+  billed_cost_stddev_3m       TEXT NOT NULL DEFAULT '0',
+  z_score                     TEXT NOT NULL DEFAULT '0',
+  pct_change_vs_avg           TEXT NOT NULL DEFAULT '0',
+  history_months              INTEGER NOT NULL DEFAULT 0,
+  anomaly_flag                INTEGER NOT NULL DEFAULT 0,
+  refreshed_utc               TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (month_start, provider, entity_level, application_sk, service_sk)
+);
+
+CREATE INDEX IF NOT EXISTS IX_agg_cost_anomaly_month ON agg_cost_anomaly_monthly (month_start, provider, anomaly_flag);
+
 CREATE INDEX IF NOT EXISTS IX_ingestion_batch_source ON dim_ingestion_batch (source_file, focus_version, status);
 CREATE INDEX IF NOT EXISTS IX_fact_cost_daily_batch ON fact_focus_cost_daily (ingestion_batch_id);
 CREATE INDEX IF NOT EXISTS IX_fact_cost_daily_date_account ON fact_focus_cost_daily (charge_date, billing_account_sk);
@@ -754,6 +774,17 @@ SELECT a.month_start, a.provider, app.application_sk, app.application_name, app.
 FROM agg_app_service_monthly a
 INNER JOIN dim_application app ON a.application_sk = app.application_sk
 INNER JOIN dim_service svc ON a.service_sk = svc.service_sk;
+
+DROP VIEW IF EXISTS vw_pbi_cost_anomaly_monthly;
+CREATE VIEW vw_pbi_cost_anomaly_monthly AS
+SELECT a.month_start, a.month_start AS billing_period_start, a.provider, a.entity_level,
+  a.application_sk, app.application_name, app.alias_values,
+  a.service_sk, svc.service_name,
+  a.billed_cost_current, a.billed_cost_avg_3m, a.billed_cost_stddev_3m,
+  a.z_score, a.pct_change_vs_avg, a.history_months, a.anomaly_flag, a.refreshed_utc
+FROM agg_cost_anomaly_monthly a
+INNER JOIN dim_application app ON a.application_sk = app.application_sk
+LEFT JOIN dim_service svc ON a.service_sk = svc.service_sk;
 
 DROP VIEW IF EXISTS vw_pbi_cost_distribution_monthly;
 CREATE VIEW vw_pbi_cost_distribution_monthly AS
