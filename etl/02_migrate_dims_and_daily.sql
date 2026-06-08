@@ -365,13 +365,13 @@ WHERE NOT EXISTS (
 TRUNCATE TABLE dbo.agg_cost_daily;
 
 INSERT INTO dbo.agg_cost_daily (
-  charge_date, provider, billing_account_sk, service_sk, region_sk,
+  charge_date, provider, sub_account_sk, service_sk, region_sk,
   billed_cost, effective_cost, list_cost, contracted_cost, line_count
 )
 SELECT
   f.charge_date,
   a.provider,
-  f.billing_account_sk,
+  f.sub_account_sk,
   f.service_sk,
   f.region_sk,
   SUM(f.billed_cost),
@@ -380,19 +380,21 @@ SELECT
   SUM(f.contracted_cost),
   SUM(f.line_count)
 FROM dbo.fact_focus_cost_daily f
-INNER JOIN dbo.dim_account a ON f.billing_account_sk = a.account_sk
-GROUP BY f.charge_date, a.provider, f.billing_account_sk, f.service_sk, f.region_sk;
+INNER JOIN dbo.dim_sub_account sa ON f.sub_account_sk = sa.sub_account_sk
+INNER JOIN dbo.dim_account a ON sa.billing_account_sk = a.account_sk
+WHERE f.sub_account_sk IS NOT NULL
+GROUP BY f.charge_date, a.provider, f.sub_account_sk, f.service_sk, f.region_sk;
 
 TRUNCATE TABLE dbo.agg_cost_monthly;
 
 INSERT INTO dbo.agg_cost_monthly (
-  month_start, provider, billing_account_sk, service_category, charge_category_sk,
+  month_start, provider, sub_account_sk, service_category, charge_category_sk,
   billed_cost, effective_cost, list_cost, contracted_cost, line_count
 )
 SELECT
-  DATEFROMPARTS(YEAR(f.charge_date), MONTH(f.charge_date), 1),
+  f.billing_period_start,
   a.provider,
-  f.billing_account_sk,
+  f.sub_account_sk,
   svc.service_category,
   f.charge_category_sk,
   SUM(f.billed_cost),
@@ -401,17 +403,19 @@ SELECT
   SUM(f.contracted_cost),
   SUM(f.line_count)
 FROM dbo.fact_focus_cost_daily f
-INNER JOIN dbo.dim_account a ON f.billing_account_sk = a.account_sk
+INNER JOIN dbo.dim_sub_account sa ON f.sub_account_sk = sa.sub_account_sk
+INNER JOIN dbo.dim_account a ON sa.billing_account_sk = a.account_sk
 INNER JOIN dbo.dim_service svc ON f.service_sk = svc.service_sk
+WHERE f.sub_account_sk IS NOT NULL
 GROUP BY
-  DATEFROMPARTS(YEAR(f.charge_date), MONTH(f.charge_date), 1),
-  a.provider, f.billing_account_sk, svc.service_category, f.charge_category_sk;
+  f.billing_period_start,
+  a.provider, f.sub_account_sk, svc.service_category, f.charge_category_sk;
 
 TRUNCATE TABLE dbo.agg_cost_by_tag;
 
 INSERT INTO dbo.agg_cost_by_tag (month_start, provider, tag_key, tag_value, effective_cost, billed_cost, line_count)
 SELECT
-  DATEFROMPARTS(YEAR(f.charge_date), MONTH(f.charge_date), 1),
+  f.billing_period_start,
   a.provider,
   t.tag_key,
   t.tag_value,
@@ -419,10 +423,12 @@ SELECT
   SUM(f.billed_cost),
   SUM(f.line_count)
 FROM dbo.fact_focus_cost_daily f
-INNER JOIN dbo.dim_account a ON f.billing_account_sk = a.account_sk
+INNER JOIN dbo.dim_sub_account sa ON f.sub_account_sk = sa.sub_account_sk
+INNER JOIN dbo.dim_account a ON sa.billing_account_sk = a.account_sk
 INNER JOIN dbo.bridge_cost_tag b ON b.cost_daily_id = f.cost_daily_id
 INNER JOIN dbo.dim_tag t ON t.tag_sk = b.tag_sk
-GROUP BY DATEFROMPARTS(YEAR(f.charge_date), MONTH(f.charge_date), 1), a.provider, t.tag_key, t.tag_value;
+WHERE f.sub_account_sk IS NOT NULL
+GROUP BY f.billing_period_start, a.provider, t.tag_key, t.tag_value;
 
 TRUNCATE TABLE dbo.agg_commitment_utilization;
 
@@ -431,7 +437,7 @@ INSERT INTO dbo.agg_commitment_utilization (
   effective_cost, commitment_quantity, line_count
 )
 SELECT
-  DATEFROMPARTS(YEAR(f.charge_date), MONTH(f.charge_date), 1),
+  f.billing_period_start,
   a.provider,
   f.commitment_sk,
   COALESCE(f.commitment_discount_status, 'Unknown'),
@@ -439,10 +445,12 @@ SELECT
   SUM(f.commitment_discount_quantity),
   SUM(f.line_count)
 FROM dbo.fact_focus_cost_daily f
-INNER JOIN dbo.dim_account a ON f.billing_account_sk = a.account_sk
+INNER JOIN dbo.dim_sub_account sa ON f.sub_account_sk = sa.sub_account_sk
+INNER JOIN dbo.dim_account a ON sa.billing_account_sk = a.account_sk
 WHERE f.commitment_sk IS NOT NULL
+  AND f.sub_account_sk IS NOT NULL
 GROUP BY
-  DATEFROMPARTS(YEAR(f.charge_date), MONTH(f.charge_date), 1),
+  f.billing_period_start,
   a.provider, f.commitment_sk, COALESCE(f.commitment_discount_status, 'Unknown');
 
 TRUNCATE TABLE dbo.agg_commitment_utilization_daily;
@@ -460,8 +468,10 @@ SELECT
   SUM(f.commitment_discount_quantity),
   SUM(f.line_count)
 FROM dbo.fact_focus_cost_daily f
-INNER JOIN dbo.dim_account a ON f.billing_account_sk = a.account_sk
+INNER JOIN dbo.dim_sub_account sa ON f.sub_account_sk = sa.sub_account_sk
+INNER JOIN dbo.dim_account a ON sa.billing_account_sk = a.account_sk
 WHERE f.commitment_sk IS NOT NULL
+  AND f.sub_account_sk IS NOT NULL
 GROUP BY f.charge_date, a.provider, f.commitment_sk, COALESCE(f.commitment_discount_status, 'Unknown');
 
 TRUNCATE TABLE dbo.agg_savings_summary;
@@ -470,14 +480,15 @@ INSERT INTO dbo.agg_savings_summary (
   month_start, provider, service_sk, total_effective_cost, total_projected_savings, recommendation_count
 )
 SELECT
-  DATEFROMPARTS(YEAR(f.charge_date), MONTH(f.charge_date), 1),
+  f.billing_period_start,
   a.provider,
   f.service_sk,
   SUM(f.effective_cost),
   COALESCE(r.total_savings, 0),
   COALESCE(r.rec_count, 0)
 FROM dbo.fact_focus_cost_daily f
-INNER JOIN dbo.dim_account a ON f.billing_account_sk = a.account_sk
+INNER JOIN dbo.dim_sub_account sa ON f.sub_account_sk = sa.sub_account_sk
+INNER JOIN dbo.dim_account a ON sa.billing_account_sk = a.account_sk
 LEFT JOIN (
   SELECT
     rec.snapshot_month,
@@ -490,10 +501,11 @@ LEFT JOIN (
   INNER JOIN dbo.dim_sub_account sa ON res.sub_account_sk = sa.sub_account_sk
   INNER JOIN dbo.dim_account acc ON sa.billing_account_sk = acc.account_sk
   GROUP BY rec.snapshot_month, res.service_sk, acc.provider
-) r ON r.snapshot_month = DATEFROMPARTS(YEAR(f.charge_date), MONTH(f.charge_date), 1)
+) r ON r.snapshot_month = f.billing_period_start
    AND r.service_sk = f.service_sk AND r.provider = a.provider
+WHERE f.sub_account_sk IS NOT NULL
 GROUP BY
-  DATEFROMPARTS(YEAR(f.charge_date), MONTH(f.charge_date), 1),
+  f.billing_period_start,
   a.provider, f.service_sk, r.total_savings, r.rec_count;
 
 UPDATE dbo.dim_ingestion_batch SET status = 'PROCESSED' WHERE ingestion_batch_id = @IngestionBatchId;

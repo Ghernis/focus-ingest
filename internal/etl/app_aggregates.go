@@ -18,6 +18,17 @@ func (p *Processor) monthStartExpr(dateCol string) string {
 	return fmt.Sprintf("substr(%s,1,7)||'-01'", dateCol)
 }
 
+// billingMonthStartExpr returns the billing period start date used as the monthly grain.
+func (p *Processor) billingMonthStartExpr() string {
+	return "f.billing_period_start"
+}
+
+func (p *Processor) subAccountJoin() string {
+	return `
+INNER JOIN dim_sub_account sa ON f.sub_account_sk = sa.sub_account_sk
+INNER JOIN dim_account a ON sa.billing_account_sk = a.account_sk`
+}
+
 func (p *Processor) castCost(col string) string {
 	if p.Dialect == "sqlserver" {
 		return fmt.Sprintf("CAST(%s AS DECIMAL(28,10))", col)
@@ -72,13 +83,14 @@ func (p *Processor) rebuildAppAggregates(ctx context.Context, tx *sql.Tx) error 
 		}
 	}
 
-	month := p.monthStartExpr("f.charge_date")
+	month := p.billingMonthStartExpr()
 	app := p.applicationExpr()
 	env := p.environmentExpr()
 	billed := p.castCost("f.billed_cost")
 	effective := p.castCost("f.effective_cost")
 	now := p.nowUTC()
 	joins := p.appContextJoins()
+	subJoin := p.subAccountJoin()
 
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		INSERT INTO agg_app_monthly (
@@ -87,10 +99,11 @@ func (p *Processor) rebuildAppAggregates(ctx context.Context, tx *sql.Tx) error 
 		SELECT %s, a.provider, %s, %s,
 		  SUM(%s), SUM(%s), SUM(f.line_count), %s
 		FROM fact_focus_cost_daily f
-		INNER JOIN dim_account a ON f.billing_account_sk = a.account_sk
 		%s
+		%s
+		WHERE f.sub_account_sk IS NOT NULL
 		GROUP BY %s, a.provider, %s, %s`,
-		month, app, env, billed, effective, now, joins, month, app, env)); err != nil {
+		month, app, env, billed, effective, now, subJoin, joins, month, app, env)); err != nil {
 		return fmt.Errorf("agg_app_monthly: %w", err)
 	}
 
@@ -101,10 +114,11 @@ func (p *Processor) rebuildAppAggregates(ctx context.Context, tx *sql.Tx) error 
 		SELECT %s, a.provider, %s, %s, f.service_sk,
 		  SUM(%s), SUM(%s), SUM(f.line_count), %s
 		FROM fact_focus_cost_daily f
-		INNER JOIN dim_account a ON f.billing_account_sk = a.account_sk
 		%s
+		%s
+		WHERE f.sub_account_sk IS NOT NULL
 		GROUP BY %s, a.provider, %s, %s, f.service_sk`,
-		month, app, env, billed, effective, now, joins, month, app, env)); err != nil {
+		month, app, env, billed, effective, now, subJoin, joins, month, app, env)); err != nil {
 		return fmt.Errorf("agg_app_service_monthly: %w", err)
 	}
 
@@ -119,10 +133,11 @@ func (p *Processor) rebuildAppAggregates(ctx context.Context, tx *sql.Tx) error 
 		SELECT %s, a.provider, %s, %s, f.service_sk, %s,
 		  SUM(%s), SUM(%s), SUM(f.line_count), %s
 		FROM fact_focus_cost_daily f
-		INNER JOIN dim_account a ON f.billing_account_sk = a.account_sk
 		%s
+		%s
+		WHERE f.sub_account_sk IS NOT NULL
 		GROUP BY %s, a.provider, %s, %s, f.service_sk, %s`,
-		month, app, env, resKey, billed, effective, now, joins, month, app, env, resKey)); err != nil {
+		month, app, env, resKey, billed, effective, now, subJoin, joins, month, app, env, resKey)); err != nil {
 		return fmt.Errorf("agg_app_service_resource_monthly: %w", err)
 	}
 
@@ -130,12 +145,14 @@ func (p *Processor) rebuildAppAggregates(ctx context.Context, tx *sql.Tx) error 
 }
 
 func (p *Processor) rebuildCostDistribution(ctx context.Context, tx *sql.Tx) error {
+	// Built only from agg_app_* tables (not raw facts/staging).
 	groups := map[distKey][]float64{}
+	costCol := p.castCost("billed_cost")
 
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
 		SELECT month_start, provider, application, SUM(%s)
 		FROM agg_app_monthly
-		GROUP BY month_start, provider, application`, p.castCost("billed_cost")))
+		GROUP BY month_start, provider, application`, costCol))
 	if err != nil {
 		return err
 	}
@@ -152,41 +169,43 @@ func (p *Processor) rebuildCostDistribution(ctx context.Context, tx *sql.Tx) err
 	rows.Close()
 
 	rows, err = tx.QueryContext(ctx, fmt.Sprintf(`
-		SELECT month_start, provider, application, environment, service_sk, %s
-		FROM agg_app_service_monthly`, p.castCost("billed_cost")))
+		SELECT month_start, provider, application, service_sk, SUM(%s)
+		FROM agg_app_service_monthly
+		GROUP BY month_start, provider, application, service_sk`, costCol))
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
-		var month, provider, app, env string
+		var month, provider, app string
 		var svcSK int64
 		var cost float64
-		if err := rows.Scan(&month, &provider, &app, &env, &svcSK, &cost); err != nil {
+		if err := rows.Scan(&month, &provider, &app, &svcSK, &cost); err != nil {
 			rows.Close()
 			return err
 		}
-		k := distKey{month: month, provider: provider, level: "APP_SERVICE", parent: app + "|" + env}
+		k := distKey{month: month, provider: provider, level: "SERVICE", parent: app}
 		groups[k] = append(groups[k], cost)
 	}
 	rows.Close()
 
 	rows, err = tx.QueryContext(ctx, fmt.Sprintf(`
-		SELECT month_start, provider, application, environment, service_sk, resource_sk, %s
-		FROM agg_app_service_resource_monthly`, p.castCost("billed_cost")))
+		SELECT month_start, provider, application, service_sk, resource_sk, SUM(%s)
+		FROM agg_app_service_resource_monthly
+		GROUP BY month_start, provider, application, service_sk, resource_sk`, costCol))
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
-		var month, provider, app, env, resSK string
+		var month, provider, app, resSK string
 		var svcSK int64
 		var cost float64
-		if err := rows.Scan(&month, &provider, &app, &env, &svcSK, &resSK, &cost); err != nil {
+		if err := rows.Scan(&month, &provider, &app, &svcSK, &resSK, &cost); err != nil {
 			rows.Close()
 			return err
 		}
 		k := distKey{
-			month: month, provider: provider, level: "APP_SERVICE_RESOURCE",
-			parent: fmt.Sprintf("%s|%s|%d", app, env, svcSK),
+			month: month, provider: provider, level: "RESOURCE",
+			parent: fmt.Sprintf("%s|%d", app, svcSK),
 		}
 		groups[k] = append(groups[k], cost)
 	}
@@ -201,21 +220,21 @@ func (p *Processor) rebuildCostDistribution(ctx context.Context, tx *sql.Tx) err
 		q := `INSERT INTO agg_cost_distribution_monthly (
 			month_start, provider, level_name, parent_key,
 			entity_count, total_cost, min_cost, p50_cost, p75_cost, p90_cost, p95_cost, p99_cost,
-			max_cost, avg_cost, gini, cr5, cr10, cr20, top_10_cost_pct, tail_80_cost_pct, refreshed_utc
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))`
+			max_cost, avg_cost, stddev_cost, gini, cr5, cr10, cr20, top_10_cost_pct, tail_80_cost_pct, refreshed_utc
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))`
 		if p.Dialect == "sqlserver" {
 			q = `INSERT INTO agg_cost_distribution_monthly (
 			month_start, provider, level_name, parent_key,
 			entity_count, total_cost, min_cost, p50_cost, p75_cost, p90_cost, p95_cost, p99_cost,
-			max_cost, avg_cost, gini, cr5, cr10, cr20, top_10_cost_pct, tail_80_cost_pct, refreshed_utc
-		) VALUES (@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15,@p16,@p17,@p18,@p19,@p20,SYSUTCDATETIME())`
+			max_cost, avg_cost, stddev_cost, gini, cr5, cr10, cr20, top_10_cost_pct, tail_80_cost_pct, refreshed_utc
+		) VALUES (@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15,@p16,@p17,@p18,@p19,@p20,@p21,@p22,SYSUTCDATETIME())`
 		}
 		if _, err := tx.ExecContext(ctx, p.q(q),
 			k.month, k.provider, k.level, parent,
 			stats.EntityCount,
 			formatCost(stats.TotalCost), formatCost(stats.MinCost), formatCost(stats.P50Cost),
 			formatCost(stats.P75Cost), formatCost(stats.P90Cost), formatCost(stats.P95Cost), formatCost(stats.P99Cost),
-			formatCost(stats.MaxCost), formatCost(stats.AvgCost),
+			formatCost(stats.MaxCost), formatCost(stats.AvgCost), formatCost(stats.StdDevCost),
 			formatRatio(stats.Gini), formatRatio(stats.CR5), formatRatio(stats.CR10), formatRatio(stats.CR20),
 			formatRatio(stats.Top10CostPct), formatRatio(stats.Tail80CostPct),
 		); err != nil {

@@ -725,7 +725,7 @@ BEGIN
     agg_cost_daily_id  BIGINT IDENTITY(1,1) PRIMARY KEY,
     charge_date        DATE NOT NULL,
     provider           VARCHAR(10) NOT NULL,
-    billing_account_sk INT NOT NULL,
+    sub_account_sk     INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_sub_account(sub_account_sk),
     service_sk         INT NOT NULL,
     region_sk          INT NULL,
     billed_cost        DECIMAL(28,10) NOT NULL DEFAULT 0,
@@ -734,14 +734,14 @@ BEGIN
     contracted_cost    DECIMAL(28,10) NOT NULL DEFAULT 0,
     line_count         INT NOT NULL DEFAULT 0,
     refreshed_utc      DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
-    UNIQUE (charge_date, provider, billing_account_sk, service_sk, region_sk)
+    UNIQUE (charge_date, provider, sub_account_sk, service_sk, region_sk)
   );
 END
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_cost_daily_charge' AND object_id = OBJECT_ID(N'dbo.agg_cost_daily'))
 BEGIN
-  CREATE INDEX IX_agg_cost_daily_charge ON dbo.agg_cost_daily (charge_date, provider, billing_account_sk);
+  CREATE INDEX IX_agg_cost_daily_charge ON dbo.agg_cost_daily (charge_date, provider, sub_account_sk);
 END
 GO
 
@@ -751,7 +751,7 @@ BEGIN
     agg_cost_monthly_id BIGINT IDENTITY(1,1) PRIMARY KEY,
     month_start         DATE NOT NULL,
     provider            VARCHAR(10) NOT NULL,
-    billing_account_sk  INT NOT NULL,
+    sub_account_sk      INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_sub_account(sub_account_sk),
     service_category    VARCHAR(128) NULL,
     charge_category_sk  TINYINT NOT NULL,
     billed_cost         DECIMAL(28,10) NOT NULL DEFAULT 0,
@@ -760,14 +760,49 @@ BEGIN
     contracted_cost     DECIMAL(28,10) NOT NULL DEFAULT 0,
     line_count          INT NOT NULL DEFAULT 0,
     refreshed_utc       DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
-    UNIQUE (month_start, provider, billing_account_sk, service_category, charge_category_sk)
+    UNIQUE (month_start, provider, sub_account_sk, service_category, charge_category_sk)
   );
 END
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_cost_monthly_month' AND object_id = OBJECT_ID(N'dbo.agg_cost_monthly'))
 BEGIN
-  CREATE INDEX IX_agg_cost_monthly_month ON dbo.agg_cost_monthly (month_start, provider, billing_account_sk);
+  CREATE INDEX IX_agg_cost_monthly_month ON dbo.agg_cost_monthly (month_start, provider, sub_account_sk);
+END
+GO
+
+-- Migrate legacy agg tables: billing_account_sk → sub_account_sk (rebuild aggregates after applying)
+IF COL_LENGTH('dbo.agg_cost_daily', 'billing_account_sk') IS NOT NULL
+   AND COL_LENGTH('dbo.agg_cost_daily', 'sub_account_sk') IS NULL
+BEGIN
+  IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_cost_daily_charge' AND object_id = OBJECT_ID(N'dbo.agg_cost_daily'))
+    DROP INDEX IX_agg_cost_daily_charge ON dbo.agg_cost_daily;
+  DECLARE @uq_daily SYSNAME;
+  SELECT @uq_daily = kc.name
+  FROM sys.key_constraints kc
+  WHERE kc.parent_object_id = OBJECT_ID(N'dbo.agg_cost_daily') AND kc.type = 'UQ';
+  IF @uq_daily IS NOT NULL EXEC(N'ALTER TABLE dbo.agg_cost_daily DROP CONSTRAINT ' + QUOTENAME(@uq_daily));
+  EXEC sp_rename 'dbo.agg_cost_daily.billing_account_sk', 'sub_account_sk', 'COLUMN';
+  CREATE INDEX IX_agg_cost_daily_charge ON dbo.agg_cost_daily (charge_date, provider, sub_account_sk);
+  ALTER TABLE dbo.agg_cost_daily ADD CONSTRAINT UQ_agg_cost_daily_grain
+    UNIQUE (charge_date, provider, sub_account_sk, service_sk, region_sk);
+END
+GO
+
+IF COL_LENGTH('dbo.agg_cost_monthly', 'billing_account_sk') IS NOT NULL
+   AND COL_LENGTH('dbo.agg_cost_monthly', 'sub_account_sk') IS NULL
+BEGIN
+  IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_cost_monthly_month' AND object_id = OBJECT_ID(N'dbo.agg_cost_monthly'))
+    DROP INDEX IX_agg_cost_monthly_month ON dbo.agg_cost_monthly;
+  DECLARE @uq_monthly SYSNAME;
+  SELECT @uq_monthly = kc.name
+  FROM sys.key_constraints kc
+  WHERE kc.parent_object_id = OBJECT_ID(N'dbo.agg_cost_monthly') AND kc.type = 'UQ';
+  IF @uq_monthly IS NOT NULL EXEC(N'ALTER TABLE dbo.agg_cost_monthly DROP CONSTRAINT ' + QUOTENAME(@uq_monthly));
+  EXEC sp_rename 'dbo.agg_cost_monthly.billing_account_sk', 'sub_account_sk', 'COLUMN';
+  CREATE INDEX IX_agg_cost_monthly_month ON dbo.agg_cost_monthly (month_start, provider, sub_account_sk);
+  ALTER TABLE dbo.agg_cost_monthly ADD CONSTRAINT UQ_agg_cost_monthly_grain
+    UNIQUE (month_start, provider, sub_account_sk, service_category, charge_category_sk);
 END
 GO
 
@@ -997,18 +1032,20 @@ GO
 CREATE OR ALTER VIEW dbo.vw_pbi_cost_monthly AS
 SELECT
     a.month_start,
+    a.month_start AS billing_period_start,
     a.provider,
-    acc.account_name,
+    sa.sub_account_name AS account_name,
     a.service_category,
     cc.charge_category,
     a.billed_cost,
     a.effective_cost,
+    a.billed_cost - a.effective_cost AS discount_amount,
     a.list_cost,
     a.contracted_cost,
     a.line_count,
     a.refreshed_utc
 FROM dbo.agg_cost_monthly a
-INNER JOIN dbo.dim_account acc ON a.billing_account_sk = acc.account_sk
+INNER JOIN dbo.dim_sub_account sa ON a.sub_account_sk = sa.sub_account_sk
 INNER JOIN dbo.dim_charge_category cc ON a.charge_category_sk = cc.charge_category_sk;
 GO
 
@@ -1016,17 +1053,18 @@ CREATE OR ALTER VIEW dbo.vw_pbi_cost_daily AS
 SELECT
     a.charge_date,
     a.provider,
-    acc.account_name,
+    sa.sub_account_name AS account_name,
     svc.service_name,
     reg.region_name,
     a.billed_cost,
     a.effective_cost,
+    a.billed_cost - a.effective_cost AS discount_amount,
     a.list_cost,
     a.contracted_cost,
     a.line_count,
     a.refreshed_utc
 FROM dbo.agg_cost_daily a
-INNER JOIN dbo.dim_account acc ON a.billing_account_sk = acc.account_sk
+INNER JOIN dbo.dim_sub_account sa ON a.sub_account_sk = sa.sub_account_sk
 INNER JOIN dbo.dim_service svc ON a.service_sk = svc.service_sk
 LEFT JOIN dbo.dim_region reg ON a.region_sk = reg.region_sk;
 GO

@@ -17,6 +17,7 @@ type distributionStats struct {
 	P99Cost       float64
 	MaxCost       float64
 	AvgCost       float64
+	StdDevCost    float64
 	Gini          float64
 	CR5           float64
 	CR10          float64
@@ -47,6 +48,7 @@ func computeDistribution(costs []float64) distributionStats {
 	out.MinCost = sorted[0]
 	out.MaxCost = sorted[len(sorted)-1]
 	out.AvgCost = total / float64(len(sorted))
+	out.StdDevCost = stdDevCost(sorted, out.AvgCost)
 	out.P50Cost = percentile(sorted, 0.50)
 	out.P75Cost = percentile(sorted, 0.75)
 	out.P90Cost = percentile(sorted, 0.90)
@@ -61,8 +63,21 @@ func computeDistribution(costs []float64) distributionStats {
 	out.CR10 = concentrationRatio(desc, total, 10)
 	out.CR20 = concentrationRatio(desc, total, 20)
 	out.Top10CostPct = out.CR10 * 100
-	out.Tail80CostPct = tail80CostPct(desc, total)
+	out.Tail80CostPct = tail80CostPct(sorted, total)
 	return out
+}
+
+func stdDevCost(sortedAsc []float64, mean float64) float64 {
+	n := len(sortedAsc)
+	if n <= 1 {
+		return 0
+	}
+	var sumSq float64
+	for _, c := range sortedAsc {
+		d := c - mean
+		sumSq += d * d
+	}
+	return math.Sqrt(sumSq / float64(n))
 }
 
 func percentile(sortedAsc []float64, p float64) float64 {
@@ -114,19 +129,20 @@ func concentrationRatio(sortedDesc []float64, total float64, topN int) float64 {
 	return top / total
 }
 
-// tail80CostPct is the share of total billed cost not covered by the smallest
-// top-spending set that reaches 80% of monthly spend (long-tail share).
-func tail80CostPct(sortedDesc []float64, total float64) float64 {
-	if total == 0 {
+// tail80CostPct is the share of total billed cost contributed by the cheapest
+// 80% of entities (by count, ascending cost).
+func tail80CostPct(sortedAsc []float64, total float64) float64 {
+	n := len(sortedAsc)
+	if n == 0 || total == 0 {
 		return 0
 	}
-	target := total * 0.8
-	var cum float64
-	for _, v := range sortedDesc {
-		cum += v
-		if cum >= target {
-			return (total - cum) / total * 100
-		}
+	bottomCount := int(math.Floor(0.8 * float64(n)))
+	if bottomCount <= 0 {
+		return 0
 	}
-	return 0
+	var bottomSum float64
+	for i := 0; i < bottomCount; i++ {
+		bottomSum += sortedAsc[i]
+	}
+	return bottomSum / total * 100
 }

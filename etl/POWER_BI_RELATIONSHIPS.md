@@ -42,7 +42,9 @@ bridge_cost_tag[tag_sk]                   → dim_tag[tag_sk]
 ### Role-playing dates
 
 - **Charge date** — when usage occurred (`charge_date` / `ChargePeriodStart` day)
-- **Billing period** — invoice window (`billing_period_start`)
+- **Billing period** — invoice window (`billing_period_start` / `month_start` on monthly aggs)
+
+Monthly aggregate `month_start` stores the actual `billing_period_start` from FOCUS (not normalized to the 1st). Filter in Power BI when you only want calendar-month billings, e.g. `DAY(billing_period_start) = 1`.
 
 Use two copies of `dim_date` in Power BI (e.g. `dim_date_charge`, `dim_date_billing`) or inactive relationships.
 

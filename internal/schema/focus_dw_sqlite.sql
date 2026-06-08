@@ -487,7 +487,7 @@ CREATE TABLE IF NOT EXISTS agg_cost_daily (
   agg_cost_daily_id  INTEGER PRIMARY KEY AUTOINCREMENT,
   charge_date        TEXT NOT NULL,
   provider           TEXT NOT NULL,
-  billing_account_sk INTEGER NOT NULL,
+  sub_account_sk     INTEGER NOT NULL REFERENCES dim_sub_account(sub_account_sk),
   service_sk         INTEGER NOT NULL,
   region_sk          INTEGER NULL,
   billed_cost        TEXT NOT NULL DEFAULT '0',
@@ -496,14 +496,14 @@ CREATE TABLE IF NOT EXISTS agg_cost_daily (
   contracted_cost    TEXT NOT NULL DEFAULT '0',
   line_count         INTEGER NOT NULL DEFAULT 0,
   refreshed_utc      TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (charge_date, provider, billing_account_sk, service_sk, region_sk)
+  UNIQUE (charge_date, provider, sub_account_sk, service_sk, region_sk)
 );
 
 CREATE TABLE IF NOT EXISTS agg_cost_monthly (
   agg_cost_monthly_id INTEGER PRIMARY KEY AUTOINCREMENT,
   month_start         TEXT NOT NULL,
   provider            TEXT NOT NULL,
-  billing_account_sk  INTEGER NOT NULL,
+  sub_account_sk      INTEGER NOT NULL REFERENCES dim_sub_account(sub_account_sk),
   service_category    TEXT NULL,
   charge_category_sk  INTEGER NOT NULL,
   billed_cost         TEXT NOT NULL DEFAULT '0',
@@ -512,7 +512,7 @@ CREATE TABLE IF NOT EXISTS agg_cost_monthly (
   contracted_cost     TEXT NOT NULL DEFAULT '0',
   line_count          INTEGER NOT NULL DEFAULT 0,
   refreshed_utc       TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (month_start, provider, billing_account_sk, service_category, charge_category_sk)
+  UNIQUE (month_start, provider, sub_account_sk, service_category, charge_category_sk)
 );
 
 CREATE TABLE IF NOT EXISTS agg_cost_by_tag (
@@ -625,6 +625,7 @@ CREATE TABLE IF NOT EXISTS agg_cost_distribution_monthly (
   p99_cost                         TEXT NOT NULL DEFAULT '0',
   max_cost                         TEXT NOT NULL DEFAULT '0',
   avg_cost                         TEXT NOT NULL DEFAULT '0',
+  stddev_cost                      TEXT NOT NULL DEFAULT '0',
   gini                             TEXT NOT NULL DEFAULT '0',
   cr5                              TEXT NOT NULL DEFAULT '0',
   cr10                             TEXT NOT NULL DEFAULT '0',
@@ -642,8 +643,8 @@ CREATE INDEX IF NOT EXISTS IX_fact_cost_daily_billing_period ON fact_focus_cost_
 CREATE INDEX IF NOT EXISTS IX_fact_cost_daily_resource ON fact_focus_cost_daily (resource_sk, charge_date) WHERE resource_sk IS NOT NULL;
 CREATE INDEX IF NOT EXISTS IX_fact_cost_daily_commitment ON fact_focus_cost_daily (commitment_sk, charge_date) WHERE commitment_sk IS NOT NULL;
 CREATE INDEX IF NOT EXISTS IX_fact_cost_daily_service ON fact_focus_cost_daily (service_sk, charge_date);
-CREATE INDEX IF NOT EXISTS IX_agg_cost_daily_charge ON agg_cost_daily (charge_date, provider, billing_account_sk);
-CREATE INDEX IF NOT EXISTS IX_agg_cost_monthly_month ON agg_cost_monthly (month_start, provider, billing_account_sk);
+CREATE INDEX IF NOT EXISTS IX_agg_cost_daily_charge ON agg_cost_daily (charge_date, provider, sub_account_sk);
+CREATE INDEX IF NOT EXISTS IX_agg_cost_monthly_month ON agg_cost_monthly (month_start, provider, sub_account_sk);
 CREATE INDEX IF NOT EXISTS IX_agg_app_monthly_month ON agg_app_monthly (month_start, provider, application, environment);
 CREATE INDEX IF NOT EXISTS IX_agg_app_service_monthly_month ON agg_app_service_monthly (month_start, provider, application, environment);
 
@@ -686,18 +687,22 @@ LIMIT 100;
 
 DROP VIEW IF EXISTS vw_pbi_cost_monthly;
 CREATE VIEW vw_pbi_cost_monthly AS
-SELECT a.month_start, a.provider, acc.account_name, a.service_category, cc.charge_category,
-  a.billed_cost, a.effective_cost, a.list_cost, a.contracted_cost, a.line_count, a.refreshed_utc
+SELECT a.month_start, a.month_start AS billing_period_start, a.provider, sa.sub_account_name AS account_name, a.service_category, cc.charge_category,
+  a.billed_cost, a.effective_cost,
+  CAST(a.billed_cost AS REAL) - CAST(a.effective_cost AS REAL) AS discount_amount,
+  a.list_cost, a.contracted_cost, a.line_count, a.refreshed_utc
 FROM agg_cost_monthly a
-INNER JOIN dim_account acc ON a.billing_account_sk = acc.account_sk
+INNER JOIN dim_sub_account sa ON a.sub_account_sk = sa.sub_account_sk
 INNER JOIN dim_charge_category cc ON a.charge_category_sk = cc.charge_category_sk;
 
 DROP VIEW IF EXISTS vw_pbi_cost_daily;
 CREATE VIEW vw_pbi_cost_daily AS
-SELECT a.charge_date, a.provider, acc.account_name, svc.service_name, reg.region_name,
-  a.billed_cost, a.effective_cost, a.list_cost, a.contracted_cost, a.line_count, a.refreshed_utc
+SELECT a.charge_date, a.provider, sa.sub_account_name AS account_name, svc.service_name, reg.region_name,
+  a.billed_cost, a.effective_cost,
+  CAST(a.billed_cost AS REAL) - CAST(a.effective_cost AS REAL) AS discount_amount,
+  a.list_cost, a.contracted_cost, a.line_count, a.refreshed_utc
 FROM agg_cost_daily a
-INNER JOIN dim_account acc ON a.billing_account_sk = acc.account_sk
+INNER JOIN dim_sub_account sa ON a.sub_account_sk = sa.sub_account_sk
 INNER JOIN dim_service svc ON a.service_sk = svc.service_sk
 LEFT JOIN dim_region reg ON a.region_sk = reg.region_sk;
 
@@ -722,9 +727,9 @@ INNER JOIN dim_service svc ON a.service_sk = svc.service_sk;
 
 DROP VIEW IF EXISTS vw_pbi_cost_distribution_monthly;
 CREATE VIEW vw_pbi_cost_distribution_monthly AS
-SELECT month_start, provider, level_name, parent_key,
+SELECT month_start, month_start AS billing_period_start, provider, level_name, parent_key,
   entity_count, total_cost, min_cost, p50_cost, p75_cost, p90_cost, p95_cost, p99_cost,
-  max_cost, avg_cost, gini, cr5, cr10, cr20, top_10_cost_pct, tail_80_cost_pct, refreshed_utc
+  max_cost, avg_cost, stddev_cost, gini, cr5, cr10, cr20, top_10_cost_pct, tail_80_cost_pct, refreshed_utc
 FROM agg_cost_distribution_monthly;
 
 DROP VIEW IF EXISTS vw_pbi_commitment_utilization;
