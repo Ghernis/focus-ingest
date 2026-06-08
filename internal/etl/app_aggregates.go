@@ -62,10 +62,6 @@ LEFT JOIN (
 ) env_tag ON env_tag.cost_daily_id = f.cost_daily_id`
 }
 
-func (p *Processor) applicationExpr() string {
-	return `COALESCE(NULLIF(TRIM(res.application), ''), NULLIF(TRIM(app_tag.tag_value), ''), '(Unassigned)')`
-}
-
 func (p *Processor) environmentExpr() string {
 	return `COALESCE(NULLIF(TRIM(res.environment), ''), NULLIF(TRIM(env_tag.tag_value), ''), '(Unknown)')`
 }
@@ -83,42 +79,48 @@ func (p *Processor) rebuildAppAggregates(ctx context.Context, tx *sql.Tx) error 
 		}
 	}
 
+	if err := p.syncApplicationsFromFacts(ctx, tx); err != nil {
+		return fmt.Errorf("sync applications: %w", err)
+	}
+
 	month := p.billingMonthStartExpr()
-	app := p.applicationExpr()
 	env := p.environmentExpr()
 	billed := p.castCost("f.billed_cost")
 	effective := p.castCost("f.effective_cost")
 	now := p.nowUTC()
 	joins := p.appContextJoins()
+	appJoin := p.applicationDimJoin()
 	subJoin := p.subAccountJoin()
 
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		INSERT INTO agg_app_monthly (
-		  month_start, provider, application, environment,
+		  month_start, provider, application_sk, environment,
 		  billed_cost, effective_cost, line_count, refreshed_utc)
-		SELECT %s, a.provider, %s, %s,
+		SELECT %s, a.provider, da.application_sk, %s,
 		  SUM(%s), SUM(%s), SUM(f.line_count), %s
 		FROM fact_focus_cost_daily f
 		%s
 		%s
+		%s
 		WHERE f.sub_account_sk IS NOT NULL
-		GROUP BY %s, a.provider, %s, %s`,
-		month, app, env, billed, effective, now, subJoin, joins, month, app, env)); err != nil {
+		GROUP BY %s, a.provider, da.application_sk, %s`,
+		month, env, billed, effective, now, subJoin, joins, appJoin, month, env)); err != nil {
 		return fmt.Errorf("agg_app_monthly: %w", err)
 	}
 
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		INSERT INTO agg_app_service_monthly (
-		  month_start, provider, application, environment, service_sk,
+		  month_start, provider, application_sk, environment, service_sk,
 		  billed_cost, effective_cost, line_count, refreshed_utc)
-		SELECT %s, a.provider, %s, %s, f.service_sk,
+		SELECT %s, a.provider, da.application_sk, %s, f.service_sk,
 		  SUM(%s), SUM(%s), SUM(f.line_count), %s
 		FROM fact_focus_cost_daily f
 		%s
 		%s
+		%s
 		WHERE f.sub_account_sk IS NOT NULL
-		GROUP BY %s, a.provider, %s, %s, f.service_sk`,
-		month, app, env, billed, effective, now, subJoin, joins, month, app, env)); err != nil {
+		GROUP BY %s, a.provider, da.application_sk, %s, f.service_sk`,
+		month, env, billed, effective, now, subJoin, joins, appJoin, month, env)); err != nil {
 		return fmt.Errorf("agg_app_service_monthly: %w", err)
 	}
 
@@ -128,16 +130,17 @@ func (p *Processor) rebuildAppAggregates(ctx context.Context, tx *sql.Tx) error 
 	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		INSERT INTO agg_app_service_resource_monthly (
-		  month_start, provider, application, environment, service_sk, resource_sk,
+		  month_start, provider, application_sk, environment, service_sk, resource_sk,
 		  billed_cost, effective_cost, line_count, refreshed_utc)
-		SELECT %s, a.provider, %s, %s, f.service_sk, %s,
+		SELECT %s, a.provider, da.application_sk, %s, f.service_sk, %s,
 		  SUM(%s), SUM(%s), SUM(f.line_count), %s
 		FROM fact_focus_cost_daily f
 		%s
 		%s
+		%s
 		WHERE f.sub_account_sk IS NOT NULL
-		GROUP BY %s, a.provider, %s, %s, f.service_sk, %s`,
-		month, app, env, resKey, billed, effective, now, subJoin, joins, month, app, env, resKey)); err != nil {
+		GROUP BY %s, a.provider, da.application_sk, %s, f.service_sk, %s`,
+		month, env, resKey, billed, effective, now, subJoin, joins, appJoin, month, env, resKey)); err != nil {
 		return fmt.Errorf("agg_app_service_resource_monthly: %w", err)
 	}
 
@@ -150,16 +153,17 @@ func (p *Processor) rebuildCostDistribution(ctx context.Context, tx *sql.Tx) err
 	costCol := p.castCost("billed_cost")
 
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
-		SELECT month_start, provider, application, SUM(%s)
+		SELECT month_start, provider, application_sk, SUM(%s)
 		FROM agg_app_monthly
-		GROUP BY month_start, provider, application`, costCol))
+		GROUP BY month_start, provider, application_sk`, costCol))
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
-		var month, provider, app string
+		var month, provider string
+		var appSK int64
 		var cost float64
-		if err := rows.Scan(&month, &provider, &app, &cost); err != nil {
+		if err := rows.Scan(&month, &provider, &appSK, &cost); err != nil {
 			rows.Close()
 			return err
 		}
@@ -169,43 +173,43 @@ func (p *Processor) rebuildCostDistribution(ctx context.Context, tx *sql.Tx) err
 	rows.Close()
 
 	rows, err = tx.QueryContext(ctx, fmt.Sprintf(`
-		SELECT month_start, provider, application, service_sk, SUM(%s)
+		SELECT month_start, provider, application_sk, service_sk, SUM(%s)
 		FROM agg_app_service_monthly
-		GROUP BY month_start, provider, application, service_sk`, costCol))
+		GROUP BY month_start, provider, application_sk, service_sk`, costCol))
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
-		var month, provider, app string
-		var svcSK int64
+		var month, provider string
+		var appSK, svcSK int64
 		var cost float64
-		if err := rows.Scan(&month, &provider, &app, &svcSK, &cost); err != nil {
+		if err := rows.Scan(&month, &provider, &appSK, &svcSK, &cost); err != nil {
 			rows.Close()
 			return err
 		}
-		k := distKey{month: month, provider: provider, level: "SERVICE", parent: app}
+		k := distKey{month: month, provider: provider, level: "SERVICE", parent: strconv.FormatInt(appSK, 10)}
 		groups[k] = append(groups[k], cost)
 	}
 	rows.Close()
 
 	rows, err = tx.QueryContext(ctx, fmt.Sprintf(`
-		SELECT month_start, provider, application, service_sk, resource_sk, SUM(%s)
+		SELECT month_start, provider, application_sk, service_sk, resource_sk, SUM(%s)
 		FROM agg_app_service_resource_monthly
-		GROUP BY month_start, provider, application, service_sk, resource_sk`, costCol))
+		GROUP BY month_start, provider, application_sk, service_sk, resource_sk`, costCol))
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
-		var month, provider, app, resSK string
-		var svcSK int64
+		var month, provider, resSK string
+		var appSK, svcSK int64
 		var cost float64
-		if err := rows.Scan(&month, &provider, &app, &svcSK, &resSK, &cost); err != nil {
+		if err := rows.Scan(&month, &provider, &appSK, &svcSK, &resSK, &cost); err != nil {
 			rows.Close()
 			return err
 		}
 		k := distKey{
 			month: month, provider: provider, level: "RESOURCE",
-			parent: fmt.Sprintf("%s|%d", app, svcSK),
+			parent: fmt.Sprintf("%d|%d", appSK, svcSK),
 		}
 		groups[k] = append(groups[k], cost)
 	}

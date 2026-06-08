@@ -210,6 +210,38 @@ BEGIN
 END
 GO
 
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.dim_application') AND type = N'U')
+BEGIN
+  CREATE TABLE dbo.dim_application (
+    application_sk   INT IDENTITY(1,1) PRIMARY KEY,
+    application_name VARCHAR(256) NOT NULL,
+    alias_values     NVARCHAR(MAX) NULL,
+    first_seen_date  DATE         NULL,
+    created_utc      DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    updated_utc      DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    UNIQUE (application_name)
+  );
+END
+GO
+
+IF COL_LENGTH('dbo.dim_application', 'first_seen_date') IS NULL
+BEGIN
+  ALTER TABLE dbo.dim_application ADD first_seen_date DATE NULL;
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_dim_application_name' AND object_id = OBJECT_ID(N'dbo.dim_application'))
+BEGIN
+  CREATE INDEX IX_dim_application_name ON dbo.dim_application (application_name);
+END
+GO
+
+MERGE dbo.dim_application AS t
+USING (SELECT '(UNASSIGNED)' AS application_name, '(Unassigned)' AS alias_values) AS s
+ON t.application_name = s.application_name
+WHEN NOT MATCHED THEN INSERT (application_name, alias_values) VALUES (s.application_name, s.alias_values);
+GO
+
 -- Seed FOCUS lookup values
 MERGE dbo.dim_charge_category AS t
 USING (VALUES ('Usage'),('Purchase'),('Tax'),('Credit'),('Adjustment')) AS s(charge_category)
@@ -898,13 +930,13 @@ BEGIN
     agg_app_monthly_id BIGINT IDENTITY(1,1) PRIMARY KEY,
     month_start        DATE NOT NULL,
     provider           VARCHAR(10) NOT NULL,
-    application        NVARCHAR(256) NOT NULL,
+    application_sk     INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_application(application_sk),
     environment        NVARCHAR(128) NOT NULL DEFAULT '(Unknown)',
     billed_cost        DECIMAL(28,10) NOT NULL DEFAULT 0,
     effective_cost     DECIMAL(28,10) NOT NULL DEFAULT 0,
     line_count         INT NOT NULL DEFAULT 0,
     refreshed_utc      DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
-    UNIQUE (month_start, provider, application, environment)
+    UNIQUE (month_start, provider, application_sk, environment)
   );
 END
 GO
@@ -915,14 +947,14 @@ BEGIN
     agg_app_service_monthly_id BIGINT IDENTITY(1,1) PRIMARY KEY,
     month_start                DATE NOT NULL,
     provider                   VARCHAR(10) NOT NULL,
-    application                NVARCHAR(256) NOT NULL,
+    application_sk             INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_application(application_sk),
     environment                NVARCHAR(128) NOT NULL DEFAULT '(Unknown)',
     service_sk                 INT NOT NULL,
     billed_cost                DECIMAL(28,10) NOT NULL DEFAULT 0,
     effective_cost             DECIMAL(28,10) NOT NULL DEFAULT 0,
     line_count                 INT NOT NULL DEFAULT 0,
     refreshed_utc              DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
-    UNIQUE (month_start, provider, application, environment, service_sk)
+    UNIQUE (month_start, provider, application_sk, environment, service_sk)
   );
 END
 GO
@@ -933,7 +965,7 @@ BEGIN
     agg_app_service_resource_monthly_id BIGINT IDENTITY(1,1) PRIMARY KEY,
     month_start                         DATE NOT NULL,
     provider                            VARCHAR(10) NOT NULL,
-    application                         NVARCHAR(256) NOT NULL,
+    application_sk                      INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_application(application_sk),
     environment                         NVARCHAR(128) NOT NULL DEFAULT '(Unknown)',
     service_sk                          INT NOT NULL,
     resource_sk                         VARCHAR(32) NOT NULL DEFAULT '',
@@ -941,8 +973,56 @@ BEGIN
     effective_cost                      DECIMAL(28,10) NOT NULL DEFAULT 0,
     line_count                          INT NOT NULL DEFAULT 0,
     refreshed_utc                       DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
-    UNIQUE (month_start, provider, application, environment, service_sk, resource_sk)
+    UNIQUE (month_start, provider, application_sk, environment, service_sk, resource_sk)
   );
+END
+GO
+
+-- Migrate legacy app aggs: application (name) → application_sk (rebuild aggregates after applying)
+IF COL_LENGTH('dbo.agg_app_monthly', 'application') IS NOT NULL
+   AND COL_LENGTH('dbo.agg_app_monthly', 'application_sk') IS NULL
+BEGIN
+  TRUNCATE TABLE dbo.agg_app_monthly;
+  TRUNCATE TABLE dbo.agg_app_service_monthly;
+  TRUNCATE TABLE dbo.agg_app_service_resource_monthly;
+  TRUNCATE TABLE dbo.agg_cost_distribution_monthly;
+
+  DECLARE @uq_app SYSNAME;
+  SELECT @uq_app = kc.name FROM sys.key_constraints kc
+  WHERE kc.parent_object_id = OBJECT_ID(N'dbo.agg_app_monthly') AND kc.type = 'UQ';
+  IF @uq_app IS NOT NULL EXEC(N'ALTER TABLE dbo.agg_app_monthly DROP CONSTRAINT ' + QUOTENAME(@uq_app));
+  ALTER TABLE dbo.agg_app_monthly DROP COLUMN application;
+  ALTER TABLE dbo.agg_app_monthly ADD application_sk INT NOT NULL
+    CONSTRAINT DF_agg_app_monthly_app_sk DEFAULT 1;
+  ALTER TABLE dbo.agg_app_monthly DROP CONSTRAINT DF_agg_app_monthly_app_sk;
+  ALTER TABLE dbo.agg_app_monthly ADD CONSTRAINT FK_agg_app_monthly_app
+    FOREIGN KEY (application_sk) REFERENCES dbo.dim_application(application_sk);
+  ALTER TABLE dbo.agg_app_monthly ADD CONSTRAINT UQ_agg_app_monthly_grain
+    UNIQUE (month_start, provider, application_sk, environment);
+
+  SELECT @uq_app = kc.name FROM sys.key_constraints kc
+  WHERE kc.parent_object_id = OBJECT_ID(N'dbo.agg_app_service_monthly') AND kc.type = 'UQ';
+  IF @uq_app IS NOT NULL EXEC(N'ALTER TABLE dbo.agg_app_service_monthly DROP CONSTRAINT ' + QUOTENAME(@uq_app));
+  ALTER TABLE dbo.agg_app_service_monthly DROP COLUMN application;
+  ALTER TABLE dbo.agg_app_service_monthly ADD application_sk INT NOT NULL
+    CONSTRAINT DF_agg_app_svc_monthly_app_sk DEFAULT 1;
+  ALTER TABLE dbo.agg_app_service_monthly DROP CONSTRAINT DF_agg_app_svc_monthly_app_sk;
+  ALTER TABLE dbo.agg_app_service_monthly ADD CONSTRAINT FK_agg_app_service_monthly_app
+    FOREIGN KEY (application_sk) REFERENCES dbo.dim_application(application_sk);
+  ALTER TABLE dbo.agg_app_service_monthly ADD CONSTRAINT UQ_agg_app_service_monthly_grain
+    UNIQUE (month_start, provider, application_sk, environment, service_sk);
+
+  SELECT @uq_app = kc.name FROM sys.key_constraints kc
+  WHERE kc.parent_object_id = OBJECT_ID(N'dbo.agg_app_service_resource_monthly') AND kc.type = 'UQ';
+  IF @uq_app IS NOT NULL EXEC(N'ALTER TABLE dbo.agg_app_service_resource_monthly DROP CONSTRAINT ' + QUOTENAME(@uq_app));
+  ALTER TABLE dbo.agg_app_service_resource_monthly DROP COLUMN application;
+  ALTER TABLE dbo.agg_app_service_resource_monthly ADD application_sk INT NOT NULL
+    CONSTRAINT DF_agg_app_res_monthly_app_sk DEFAULT 1;
+  ALTER TABLE dbo.agg_app_service_resource_monthly DROP CONSTRAINT DF_agg_app_res_monthly_app_sk;
+  ALTER TABLE dbo.agg_app_service_resource_monthly ADD CONSTRAINT FK_agg_app_service_resource_monthly_app
+    FOREIGN KEY (application_sk) REFERENCES dbo.dim_application(application_sk);
+  ALTER TABLE dbo.agg_app_service_resource_monthly ADD CONSTRAINT UQ_agg_app_service_resource_monthly_grain
+    UNIQUE (month_start, provider, application_sk, environment, service_sk, resource_sk);
 END
 GO
 
@@ -986,7 +1066,7 @@ GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_app_monthly_month' AND object_id = OBJECT_ID(N'dbo.agg_app_monthly'))
 BEGIN
-  CREATE INDEX IX_agg_app_monthly_month ON dbo.agg_app_monthly (month_start, provider, application, environment);
+  CREATE INDEX IX_agg_app_monthly_month ON dbo.agg_app_monthly (month_start, provider, application_sk, environment);
 END
 GO
 
@@ -1219,29 +1299,51 @@ CREATE OR ALTER VIEW dbo.vw_pbi_app_monthly AS
 SELECT
     a.month_start,
     a.provider,
-    a.application,
+    app.application_sk,
+    app.application_name,
+    app.alias_values,
+    app.first_seen_date,
+    CONCAT(app.application_sk, ';', app.application_name, ';', COALESCE(app.alias_values, '')) AS application_summary,
     a.environment,
     a.billed_cost,
     a.effective_cost,
+    a.billed_cost - a.effective_cost AS discount_amount,
     a.line_count,
     a.refreshed_utc
-FROM dbo.agg_app_monthly a;
+FROM dbo.agg_app_monthly a
+INNER JOIN dbo.dim_application app ON a.application_sk = app.application_sk;
 GO
 
 CREATE OR ALTER VIEW dbo.vw_pbi_app_service_monthly AS
 SELECT
     a.month_start,
     a.provider,
-    a.application,
+    app.application_sk,
+    app.application_name,
+    app.alias_values,
     a.environment,
     svc.service_name,
     svc.service_category,
     a.billed_cost,
     a.effective_cost,
+    a.billed_cost - a.effective_cost AS discount_amount,
     a.line_count,
     a.refreshed_utc
 FROM dbo.agg_app_service_monthly a
+INNER JOIN dbo.dim_application app ON a.application_sk = app.application_sk
 INNER JOIN dbo.dim_service svc ON a.service_sk = svc.service_sk;
+GO
+
+CREATE OR ALTER VIEW dbo.vw_dim_application AS
+SELECT
+    application_sk,
+    application_name,
+    alias_values,
+    first_seen_date,
+    CONCAT(application_sk, ';', application_name, ';', COALESCE(alias_values, '')) AS application_summary,
+    created_utc,
+    updated_utc
+FROM dbo.dim_application;
 GO
 
 CREATE OR ALTER VIEW dbo.vw_pbi_cost_distribution_monthly AS

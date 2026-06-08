@@ -88,7 +88,7 @@ func (p *Processor) upsertDimensions(ctx context.Context, tx *sql.Tx, rows []nor
 			return err
 		}
 	}
-	return nil
+	return p.syncApplicationsFromRows(ctx, tx, rows)
 }
 
 func (p *Processor) upsertAccount(ctx context.Context, tx *sql.Tx, r normRow) error {

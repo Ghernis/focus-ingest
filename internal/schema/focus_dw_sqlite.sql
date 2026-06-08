@@ -139,6 +139,20 @@ CREATE TABLE IF NOT EXISTS dim_tag (
   UNIQUE (tag_key, tag_value)
 );
 
+CREATE TABLE IF NOT EXISTS dim_application (
+  application_sk   INTEGER PRIMARY KEY AUTOINCREMENT,
+  application_name TEXT NOT NULL UNIQUE,
+  alias_values     TEXT NULL,
+  first_seen_date  TEXT NULL,
+  created_utc      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_utc      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS IX_dim_application_name ON dim_application (application_name);
+
+INSERT OR IGNORE INTO dim_application (application_name, alias_values)
+VALUES ('(UNASSIGNED)', '(Unassigned)');
+
 INSERT OR IGNORE INTO dim_charge_category (charge_category) VALUES ('Usage'),('Purchase'),('Tax'),('Credit'),('Adjustment');
 INSERT OR IGNORE INTO dim_charge_frequency (charge_frequency) VALUES ('Usage-Based'),('Recurring'),('One-Time');
 INSERT OR IGNORE INTO dim_pricing_category (pricing_category) VALUES ('Standard'),('Committed'),('Dynamic'),('Other');
@@ -572,34 +586,34 @@ CREATE TABLE IF NOT EXISTS agg_app_monthly (
   agg_app_monthly_id INTEGER PRIMARY KEY AUTOINCREMENT,
   month_start        TEXT NOT NULL,
   provider           TEXT NOT NULL,
-  application        TEXT NOT NULL,
+  application_sk     INTEGER NOT NULL REFERENCES dim_application(application_sk),
   environment        TEXT NOT NULL DEFAULT '(Unknown)',
   billed_cost        TEXT NOT NULL DEFAULT '0',
   effective_cost     TEXT NOT NULL DEFAULT '0',
   line_count         INTEGER NOT NULL DEFAULT 0,
   refreshed_utc      TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (month_start, provider, application, environment)
+  UNIQUE (month_start, provider, application_sk, environment)
 );
 
 CREATE TABLE IF NOT EXISTS agg_app_service_monthly (
   agg_app_service_monthly_id INTEGER PRIMARY KEY AUTOINCREMENT,
   month_start                TEXT NOT NULL,
   provider                   TEXT NOT NULL,
-  application                TEXT NOT NULL,
+  application_sk             INTEGER NOT NULL REFERENCES dim_application(application_sk),
   environment                TEXT NOT NULL DEFAULT '(Unknown)',
   service_sk                 INTEGER NOT NULL,
   billed_cost                TEXT NOT NULL DEFAULT '0',
   effective_cost             TEXT NOT NULL DEFAULT '0',
   line_count                 INTEGER NOT NULL DEFAULT 0,
   refreshed_utc              TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (month_start, provider, application, environment, service_sk)
+  UNIQUE (month_start, provider, application_sk, environment, service_sk)
 );
 
 CREATE TABLE IF NOT EXISTS agg_app_service_resource_monthly (
   agg_app_service_resource_monthly_id INTEGER PRIMARY KEY AUTOINCREMENT,
   month_start                       TEXT NOT NULL,
   provider                          TEXT NOT NULL,
-  application                       TEXT NOT NULL,
+  application_sk                    INTEGER NOT NULL REFERENCES dim_application(application_sk),
   environment                       TEXT NOT NULL DEFAULT '(Unknown)',
   service_sk                        INTEGER NOT NULL,
   resource_sk                       TEXT NOT NULL DEFAULT '',
@@ -607,7 +621,7 @@ CREATE TABLE IF NOT EXISTS agg_app_service_resource_monthly (
   effective_cost                    TEXT NOT NULL DEFAULT '0',
   line_count                        INTEGER NOT NULL DEFAULT 0,
   refreshed_utc                     TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (month_start, provider, application, environment, service_sk, resource_sk)
+  UNIQUE (month_start, provider, application_sk, environment, service_sk, resource_sk)
 );
 
 CREATE TABLE IF NOT EXISTS agg_cost_distribution_monthly (
@@ -646,8 +660,8 @@ CREATE INDEX IF NOT EXISTS IX_fact_cost_daily_commitment ON fact_focus_cost_dail
 CREATE INDEX IF NOT EXISTS IX_fact_cost_daily_service ON fact_focus_cost_daily (service_sk, charge_date);
 CREATE INDEX IF NOT EXISTS IX_agg_cost_daily_charge ON agg_cost_daily (charge_date, billing_period_start, provider, sub_account_sk);
 CREATE INDEX IF NOT EXISTS IX_agg_cost_monthly_month ON agg_cost_monthly (month_start, provider, sub_account_sk);
-CREATE INDEX IF NOT EXISTS IX_agg_app_monthly_month ON agg_app_monthly (month_start, provider, application, environment);
-CREATE INDEX IF NOT EXISTS IX_agg_app_service_monthly_month ON agg_app_service_monthly (month_start, provider, application, environment);
+CREATE INDEX IF NOT EXISTS IX_agg_app_monthly_month ON agg_app_monthly (month_start, provider, application_sk, environment);
+CREATE INDEX IF NOT EXISTS IX_agg_app_service_monthly_month ON agg_app_service_monthly (month_start, provider, application_sk, environment);
 
 -- SECTION 6: VIEWS
 
@@ -713,18 +727,32 @@ CREATE VIEW vw_pbi_cost_by_tag AS
 SELECT month_start, provider, tag_key, tag_value, billed_cost, effective_cost, line_count, refreshed_utc
 FROM agg_cost_by_tag;
 
+DROP VIEW IF EXISTS vw_dim_application;
+CREATE VIEW vw_dim_application AS
+SELECT application_sk, application_name, alias_values, first_seen_date,
+  application_sk || ';' || application_name || ';' || COALESCE(alias_values, '') AS application_summary,
+  created_utc, updated_utc
+FROM dim_application;
+
 DROP VIEW IF EXISTS vw_pbi_app_monthly;
 CREATE VIEW vw_pbi_app_monthly AS
-SELECT a.month_start, a.provider, a.application, a.environment,
-  a.billed_cost, a.effective_cost, a.line_count, a.refreshed_utc
-FROM agg_app_monthly a;
+SELECT a.month_start, a.provider, app.application_sk, app.application_name, app.alias_values, app.first_seen_date,
+  app.application_sk || ';' || app.application_name || ';' || COALESCE(app.alias_values, '') AS application_summary,
+  a.environment, a.billed_cost, a.effective_cost,
+  CAST(a.billed_cost AS REAL) - CAST(a.effective_cost AS REAL) AS discount_amount,
+  a.line_count, a.refreshed_utc
+FROM agg_app_monthly a
+INNER JOIN dim_application app ON a.application_sk = app.application_sk;
 
 DROP VIEW IF EXISTS vw_pbi_app_service_monthly;
 CREATE VIEW vw_pbi_app_service_monthly AS
-SELECT a.month_start, a.provider, a.application, a.environment,
-  svc.service_name, svc.service_category,
-  a.billed_cost, a.effective_cost, a.line_count, a.refreshed_utc
+SELECT a.month_start, a.provider, app.application_sk, app.application_name, app.alias_values,
+  a.environment, svc.service_name, svc.service_category,
+  a.billed_cost, a.effective_cost,
+  CAST(a.billed_cost AS REAL) - CAST(a.effective_cost AS REAL) AS discount_amount,
+  a.line_count, a.refreshed_utc
 FROM agg_app_service_monthly a
+INNER JOIN dim_application app ON a.application_sk = app.application_sk
 INNER JOIN dim_service svc ON a.service_sk = svc.service_sk;
 
 DROP VIEW IF EXISTS vw_pbi_cost_distribution_monthly;

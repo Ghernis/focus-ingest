@@ -14,6 +14,7 @@ Connect Power BI Desktop to Azure SQL using **Import** mode on aggregate views (
 | `vw_pbi_savings_summary` | Fact (agg) | Spend vs recommendation savings |
 | `vw_recommendations_summary` | Fact | Rightsizing / optimization detail |
 | `vw_top_savings_opportunities` | Fact | Top 100 savings (or query underlying table) |
+| `dim_application` / `vw_dim_application` | Dimension | Normalized applications + comma-separated aliases |
 | `dim_account` | Dimension | Billing accounts |
 | `dim_service` | Dimension | Service names and categories |
 | `dim_region` | Dimension | Regions |
@@ -26,6 +27,8 @@ Optional detail: `fact_focus_cost_daily` for resource-level drill-through (large
 Set **cross-filter direction: single** from fact → dimension.
 
 ```
+vw_pbi_app_monthly[application_sk]        → dim_application[application_sk]
+vw_pbi_app_service_monthly[application_sk] → dim_application[application_sk]
 vw_pbi_cost_monthly[month_start]          → dim_date[full_date]
 vw_pbi_cost_daily[charge_date]            → dim_date[full_date] (usage date)
 vw_pbi_cost_daily[billing_period_start] → dim_date[full_date] (billing period; use second dim_date copy)
