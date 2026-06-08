@@ -29,16 +29,16 @@ func (p *Processor) rebuildAggregates(ctx context.Context, tx *sql.Tx) error {
 
 	dailySQL := fmt.Sprintf(`
 		INSERT INTO agg_cost_daily (
-		  charge_date, provider, sub_account_sk, service_sk, region_sk,
+		  charge_date, billing_period_start, provider, sub_account_sk, service_sk, region_sk,
 		  billed_cost, effective_cost, list_cost, contracted_cost, line_count, refreshed_utc)
-		SELECT f.charge_date, a.provider, f.sub_account_sk, f.service_sk, f.region_sk,
+		SELECT f.charge_date, %s, a.provider, f.sub_account_sk, f.service_sk, f.region_sk,
 		  SUM(%s), SUM(%s), SUM(%s), SUM(%s),
 		  SUM(f.line_count), %s
 		FROM fact_focus_cost_daily f
 		%s
 		WHERE f.sub_account_sk IS NOT NULL
-		GROUP BY f.charge_date, a.provider, f.sub_account_sk, f.service_sk, f.region_sk`,
-		billed, effective, list, contracted, now, subJoin)
+		GROUP BY f.charge_date, %s, a.provider, f.sub_account_sk, f.service_sk, f.region_sk`,
+		billingPeriod, billed, effective, list, contracted, now, subJoin, billingPeriod)
 	if _, err := tx.ExecContext(ctx, dailySQL); err != nil {
 		return fmt.Errorf("agg_cost_daily: %w", err)
 	}

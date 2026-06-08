@@ -27,7 +27,8 @@ Set **cross-filter direction: single** from fact → dimension.
 
 ```
 vw_pbi_cost_monthly[month_start]          → dim_date[full_date]
-vw_pbi_cost_daily[charge_date]            → dim_date[full_date]
+vw_pbi_cost_daily[charge_date]            → dim_date[full_date] (usage date)
+vw_pbi_cost_daily[billing_period_start] → dim_date[full_date] (billing period; use second dim_date copy)
 vw_pbi_cost_monthly[account via join]     → dim_account[account_name]  (or use billing_account_sk if importing base agg table)
 vw_pbi_cost_daily[service_name]           → dim_service[service_name]
 vw_pbi_commitment_utilization[...]        → dim_commitment_discount[commitment_discount_name]

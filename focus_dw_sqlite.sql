@@ -486,6 +486,7 @@ CREATE TABLE IF NOT EXISTS exceptions (
 CREATE TABLE IF NOT EXISTS agg_cost_daily (
   agg_cost_daily_id  INTEGER PRIMARY KEY AUTOINCREMENT,
   charge_date        TEXT NOT NULL,
+  billing_period_start TEXT NOT NULL,
   provider           TEXT NOT NULL,
   sub_account_sk     INTEGER NOT NULL REFERENCES dim_sub_account(sub_account_sk),
   service_sk         INTEGER NOT NULL,
@@ -496,7 +497,7 @@ CREATE TABLE IF NOT EXISTS agg_cost_daily (
   contracted_cost    TEXT NOT NULL DEFAULT '0',
   line_count         INTEGER NOT NULL DEFAULT 0,
   refreshed_utc      TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (charge_date, provider, sub_account_sk, service_sk, region_sk)
+  UNIQUE (charge_date, billing_period_start, provider, sub_account_sk, service_sk, region_sk)
 );
 
 CREATE TABLE IF NOT EXISTS agg_cost_monthly (
@@ -571,7 +572,7 @@ CREATE INDEX IF NOT EXISTS IX_fact_cost_daily_billing_period ON fact_focus_cost_
 CREATE INDEX IF NOT EXISTS IX_fact_cost_daily_resource ON fact_focus_cost_daily (resource_sk, charge_date) WHERE resource_sk IS NOT NULL;
 CREATE INDEX IF NOT EXISTS IX_fact_cost_daily_commitment ON fact_focus_cost_daily (commitment_sk, charge_date) WHERE commitment_sk IS NOT NULL;
 CREATE INDEX IF NOT EXISTS IX_fact_cost_daily_service ON fact_focus_cost_daily (service_sk, charge_date);
-CREATE INDEX IF NOT EXISTS IX_agg_cost_daily_charge ON agg_cost_daily (charge_date, provider, sub_account_sk);
+CREATE INDEX IF NOT EXISTS IX_agg_cost_daily_charge ON agg_cost_daily (charge_date, billing_period_start, provider, sub_account_sk);
 CREATE INDEX IF NOT EXISTS IX_agg_cost_monthly_month ON agg_cost_monthly (month_start, provider, sub_account_sk);
 
 -- SECTION 6: VIEWS
@@ -623,7 +624,8 @@ INNER JOIN dim_charge_category cc ON a.charge_category_sk = cc.charge_category_s
 
 DROP VIEW IF EXISTS vw_pbi_cost_daily;
 CREATE VIEW vw_pbi_cost_daily AS
-SELECT a.charge_date, a.provider, sa.sub_account_name AS account_name, svc.service_name, reg.region_name,
+SELECT a.charge_date, a.billing_period_start, a.billing_period_start AS month_start,
+  a.provider, sa.sub_account_name AS account_name, svc.service_name, reg.region_name,
   a.billed_cost, a.effective_cost,
   CAST(a.billed_cost AS REAL) - CAST(a.effective_cost AS REAL) AS discount_amount,
   a.list_cost, a.contracted_cost, a.line_count, a.refreshed_utc

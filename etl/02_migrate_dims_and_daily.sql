@@ -365,11 +365,12 @@ WHERE NOT EXISTS (
 TRUNCATE TABLE dbo.agg_cost_daily;
 
 INSERT INTO dbo.agg_cost_daily (
-  charge_date, provider, sub_account_sk, service_sk, region_sk,
+  charge_date, billing_period_start, provider, sub_account_sk, service_sk, region_sk,
   billed_cost, effective_cost, list_cost, contracted_cost, line_count
 )
 SELECT
   f.charge_date,
+  f.billing_period_start,
   a.provider,
   f.sub_account_sk,
   f.service_sk,
@@ -383,7 +384,7 @@ FROM dbo.fact_focus_cost_daily f
 INNER JOIN dbo.dim_sub_account sa ON f.sub_account_sk = sa.sub_account_sk
 INNER JOIN dbo.dim_account a ON sa.billing_account_sk = a.account_sk
 WHERE f.sub_account_sk IS NOT NULL
-GROUP BY f.charge_date, a.provider, f.sub_account_sk, f.service_sk, f.region_sk;
+GROUP BY f.charge_date, f.billing_period_start, a.provider, f.sub_account_sk, f.service_sk, f.region_sk;
 
 TRUNCATE TABLE dbo.agg_cost_monthly;
 

@@ -724,6 +724,7 @@ BEGIN
   CREATE TABLE dbo.agg_cost_daily (
     agg_cost_daily_id  BIGINT IDENTITY(1,1) PRIMARY KEY,
     charge_date        DATE NOT NULL,
+    billing_period_start DATE NOT NULL,
     provider           VARCHAR(10) NOT NULL,
     sub_account_sk     INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_sub_account(sub_account_sk),
     service_sk         INT NOT NULL,
@@ -734,14 +735,14 @@ BEGIN
     contracted_cost    DECIMAL(28,10) NOT NULL DEFAULT 0,
     line_count         INT NOT NULL DEFAULT 0,
     refreshed_utc      DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
-    UNIQUE (charge_date, provider, sub_account_sk, service_sk, region_sk)
+    UNIQUE (charge_date, billing_period_start, provider, sub_account_sk, service_sk, region_sk)
   );
 END
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_cost_daily_charge' AND object_id = OBJECT_ID(N'dbo.agg_cost_daily'))
 BEGIN
-  CREATE INDEX IX_agg_cost_daily_charge ON dbo.agg_cost_daily (charge_date, provider, sub_account_sk);
+  CREATE INDEX IX_agg_cost_daily_charge ON dbo.agg_cost_daily (charge_date, billing_period_start, provider, sub_account_sk);
 END
 GO
 
@@ -785,7 +786,25 @@ BEGIN
   EXEC sp_rename 'dbo.agg_cost_daily.billing_account_sk', 'sub_account_sk', 'COLUMN';
   CREATE INDEX IX_agg_cost_daily_charge ON dbo.agg_cost_daily (charge_date, provider, sub_account_sk);
   ALTER TABLE dbo.agg_cost_daily ADD CONSTRAINT UQ_agg_cost_daily_grain
-    UNIQUE (charge_date, provider, sub_account_sk, service_sk, region_sk);
+    UNIQUE (charge_date, billing_period_start, provider, sub_account_sk, service_sk, region_sk);
+END
+GO
+
+IF COL_LENGTH('dbo.agg_cost_daily', 'billing_period_start') IS NULL
+BEGIN
+  IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_cost_daily_charge' AND object_id = OBJECT_ID(N'dbo.agg_cost_daily'))
+    DROP INDEX IX_agg_cost_daily_charge ON dbo.agg_cost_daily;
+  DECLARE @uq_daily_billing SYSNAME;
+  SELECT @uq_daily_billing = kc.name
+  FROM sys.key_constraints kc
+  WHERE kc.parent_object_id = OBJECT_ID(N'dbo.agg_cost_daily') AND kc.type = 'UQ';
+  IF @uq_daily_billing IS NOT NULL EXEC(N'ALTER TABLE dbo.agg_cost_daily DROP CONSTRAINT ' + QUOTENAME(@uq_daily_billing));
+  ALTER TABLE dbo.agg_cost_daily ADD billing_period_start DATE NOT NULL
+    CONSTRAINT DF_agg_cost_daily_billing_period DEFAULT '1900-01-01';
+  ALTER TABLE dbo.agg_cost_daily DROP CONSTRAINT DF_agg_cost_daily_billing_period;
+  CREATE INDEX IX_agg_cost_daily_charge ON dbo.agg_cost_daily (charge_date, billing_period_start, provider, sub_account_sk);
+  ALTER TABLE dbo.agg_cost_daily ADD CONSTRAINT UQ_agg_cost_daily_grain
+    UNIQUE (charge_date, billing_period_start, provider, sub_account_sk, service_sk, region_sk);
 END
 GO
 
@@ -1052,6 +1071,8 @@ GO
 CREATE OR ALTER VIEW dbo.vw_pbi_cost_daily AS
 SELECT
     a.charge_date,
+    a.billing_period_start,
+    a.billing_period_start AS month_start,
     a.provider,
     sa.sub_account_name AS account_name,
     svc.service_name,
