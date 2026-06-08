@@ -968,7 +968,7 @@ BEGIN
     application_sk                      INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_application(application_sk),
     environment                         NVARCHAR(128) NOT NULL DEFAULT '(Unknown)',
     service_sk                          INT NOT NULL,
-    resource_sk                         VARCHAR(32) NOT NULL DEFAULT '',
+    resource_sk                         INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_resource(resource_sk),
     billed_cost                         DECIMAL(28,10) NOT NULL DEFAULT 0,
     effective_cost                      DECIMAL(28,10) NOT NULL DEFAULT 0,
     line_count                          INT NOT NULL DEFAULT 0,
@@ -1021,6 +1021,31 @@ BEGIN
   ALTER TABLE dbo.agg_app_service_resource_monthly DROP CONSTRAINT DF_agg_app_res_monthly_app_sk;
   ALTER TABLE dbo.agg_app_service_resource_monthly ADD CONSTRAINT FK_agg_app_service_resource_monthly_app
     FOREIGN KEY (application_sk) REFERENCES dbo.dim_application(application_sk);
+  ALTER TABLE dbo.agg_app_service_resource_monthly ADD CONSTRAINT UQ_agg_app_service_resource_monthly_grain
+    UNIQUE (month_start, provider, application_sk, environment, service_sk, resource_sk);
+END
+GO
+
+-- Migrate resource_sk VARCHAR → INT FK (rebuild aggregates after applying)
+IF EXISTS (
+  SELECT 1 FROM sys.columns c
+  INNER JOIN sys.types t ON c.user_type_id = t.user_type_id
+  WHERE c.object_id = OBJECT_ID(N'dbo.agg_app_service_resource_monthly')
+    AND c.name = 'resource_sk'
+    AND t.name IN ('varchar', 'nvarchar')
+)
+BEGIN
+  TRUNCATE TABLE dbo.agg_app_service_resource_monthly;
+
+  DECLARE @uq_res SYSNAME;
+  SELECT @uq_res = kc.name FROM sys.key_constraints kc
+  WHERE kc.parent_object_id = OBJECT_ID(N'dbo.agg_app_service_resource_monthly') AND kc.type = 'UQ';
+  IF @uq_res IS NOT NULL EXEC(N'ALTER TABLE dbo.agg_app_service_resource_monthly DROP CONSTRAINT ' + QUOTENAME(@uq_res));
+
+  ALTER TABLE dbo.agg_app_service_resource_monthly DROP COLUMN resource_sk;
+  ALTER TABLE dbo.agg_app_service_resource_monthly ADD resource_sk INT NOT NULL;
+  ALTER TABLE dbo.agg_app_service_resource_monthly ADD CONSTRAINT FK_agg_app_service_resource_monthly_resource
+    FOREIGN KEY (resource_sk) REFERENCES dbo.dim_resource(resource_sk);
   ALTER TABLE dbo.agg_app_service_resource_monthly ADD CONSTRAINT UQ_agg_app_service_resource_monthly_grain
     UNIQUE (month_start, provider, application_sk, environment, service_sk, resource_sk);
 END
@@ -1080,9 +1105,17 @@ BEGIN
     pct_change_vs_avg           DECIMAL(18,8) NOT NULL DEFAULT 0,
     history_months              TINYINT NOT NULL DEFAULT 0,
     anomaly_flag                BIT NOT NULL DEFAULT 0,
+    anomaly_type                VARCHAR(32) NOT NULL DEFAULT 'NORMAL',
     refreshed_utc               DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
     UNIQUE (month_start, provider, entity_level, application_sk, service_sk)
   );
+END
+GO
+
+IF COL_LENGTH('dbo.agg_cost_anomaly_monthly', 'anomaly_type') IS NULL
+BEGIN
+  ALTER TABLE dbo.agg_cost_anomaly_monthly
+    ADD anomaly_type VARCHAR(32) NOT NULL CONSTRAINT DF_agg_cost_anomaly_type DEFAULT 'NORMAL';
 END
 GO
 
@@ -1420,6 +1453,7 @@ SELECT
     a.pct_change_vs_avg,
     a.history_months,
     a.anomaly_flag,
+    a.anomaly_type,
     a.refreshed_utc
 FROM dbo.agg_cost_anomaly_monthly a
 INNER JOIN dbo.dim_application app ON a.application_sk = app.application_sk

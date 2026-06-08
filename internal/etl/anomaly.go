@@ -12,6 +12,16 @@ const (
 	anomalyZThreshold     = 2.5
 	anomalyMinHistoryFlag = 2
 	anomalyLookbackMonths = 3
+	anomalySpikeZ         = 3.0
+	anomalySurgePct       = 0.5
+)
+
+const (
+	anomalyTypeNew    = "NEW"
+	anomalyTypeSpike  = "SPIKE"
+	anomalyTypeSurge  = "SURGE"
+	anomalyTypeDrop   = "DROP"
+	anomalyTypeNormal = "NORMAL"
 )
 
 type monthlyCostPoint struct {
@@ -32,6 +42,23 @@ type anomalyMetric struct {
 	pctChangeVsAvg float64
 	historyMonths  int
 	anomalyFlag    bool
+	anomalyType    string
+}
+
+func classifyAnomalyType(historyMonths int, currentCost, avg3m, zScore float64) string {
+	if historyMonths < 2 {
+		return anomalyTypeNew
+	}
+	if math.Abs(zScore) > anomalySpikeZ {
+		return anomalyTypeSpike
+	}
+	if avg3m > 0 && (currentCost-avg3m)/avg3m > anomalySurgePct {
+		return anomalyTypeSurge
+	}
+	if currentCost == 0 && avg3m > 0 {
+		return anomalyTypeDrop
+	}
+	return anomalyTypeNormal
 }
 
 func computeMonthlyAnomalies(points []monthlyCostPoint) []anomalyMetric {
@@ -91,6 +118,7 @@ func computeMonthlyAnomalies(points []monthlyCostPoint) []anomalyMetric {
 			pctChangeVsAvg: pct,
 			historyMonths:  history,
 			anomalyFlag:    flag,
+			anomalyType:    classifyAnomalyType(history, pt.cost, avg, z),
 		})
 	}
 	return out
@@ -219,21 +247,21 @@ func (p *Processor) insertAnomalyRow(ctx context.Context, tx *sql.Tx, m anomalyM
 	q := `INSERT INTO agg_cost_anomaly_monthly (
 		month_start, provider, entity_level, application_sk, service_sk,
 		billed_cost_current, billed_cost_avg_3m, billed_cost_stddev_3m,
-		z_score, pct_change_vs_avg, history_months, anomaly_flag, refreshed_utc
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))`
+		z_score, pct_change_vs_avg, history_months, anomaly_flag, anomaly_type, refreshed_utc
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))`
 	if p.Dialect == "sqlserver" {
 		q = `INSERT INTO agg_cost_anomaly_monthly (
 		month_start, provider, entity_level, application_sk, service_sk,
 		billed_cost_current, billed_cost_avg_3m, billed_cost_stddev_3m,
-		z_score, pct_change_vs_avg, history_months, anomaly_flag, refreshed_utc
-	) VALUES (@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,SYSUTCDATETIME())`
+		z_score, pct_change_vs_avg, history_months, anomaly_flag, anomaly_type, refreshed_utc
+	) VALUES (@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,SYSUTCDATETIME())`
 	}
 
 	_, err := tx.ExecContext(ctx, p.q(q),
 		m.month, provider, level, appSK, svc,
 		formatCost(m.currentCost), formatCost(m.avg3m), formatCost(m.stddev3m),
 		formatRatio(m.zScore), formatRatio(m.pctChangeVsAvg),
-		m.historyMonths, flag,
+		m.historyMonths, flag, m.anomalyType,
 	)
 	return err
 }

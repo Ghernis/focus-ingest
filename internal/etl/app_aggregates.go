@@ -125,23 +125,19 @@ func (p *Processor) rebuildAppAggregates(ctx context.Context, tx *sql.Tx) error 
 		return fmt.Errorf("agg_app_service_monthly: %w", err)
 	}
 
-	resKey := "COALESCE(CAST(f.resource_sk AS TEXT), '')"
-	if p.Dialect == "sqlserver" {
-		resKey = "COALESCE(CONVERT(VARCHAR(32), f.resource_sk), '')"
-	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		INSERT INTO agg_app_service_resource_monthly (
 		  month_start, provider, application_sk, environment, service_sk, resource_sk,
 		  billed_cost, effective_cost, line_count, refreshed_utc)
-		SELECT %s, a.provider, da.application_sk, %s, f.service_sk, %s,
+		SELECT %s, a.provider, da.application_sk, %s, f.service_sk, f.resource_sk,
 		  SUM(%s), SUM(%s), SUM(f.line_count), %s
 		FROM fact_focus_cost_daily f
 		%s
 		%s
 		%s
-		WHERE f.sub_account_sk IS NOT NULL
-		GROUP BY %s, a.provider, da.application_sk, %s, f.service_sk, %s`,
-		month, env, resKey, billed, effective, now, subJoin, joins, appJoin, month, env, resKey)); err != nil {
+		WHERE f.sub_account_sk IS NOT NULL AND f.resource_sk IS NOT NULL
+		GROUP BY %s, a.provider, da.application_sk, %s, f.service_sk, f.resource_sk`,
+		month, env, billed, effective, now, subJoin, joins, appJoin, month, env)); err != nil {
 		return fmt.Errorf("agg_app_service_resource_monthly: %w", err)
 	}
 
@@ -204,8 +200,8 @@ func (p *Processor) rebuildCostDistribution(ctx context.Context, tx *sql.Tx) err
 		return err
 	}
 	for rows.Next() {
-		var month, provider, resSK string
-		var appSK, svcSK int64
+		var month, provider string
+		var appSK, svcSK, resSK int64
 		var cost float64
 		if err := rows.Scan(&month, &provider, &appSK, &svcSK, &resSK, &cost); err != nil {
 			rows.Close()

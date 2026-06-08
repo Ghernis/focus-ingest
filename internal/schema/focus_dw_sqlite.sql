@@ -616,7 +616,7 @@ CREATE TABLE IF NOT EXISTS agg_app_service_resource_monthly (
   application_sk                    INTEGER NOT NULL REFERENCES dim_application(application_sk),
   environment                       TEXT NOT NULL DEFAULT '(Unknown)',
   service_sk                        INTEGER NOT NULL,
-  resource_sk                       TEXT NOT NULL DEFAULT '',
+  resource_sk                       INTEGER NOT NULL REFERENCES dim_resource(resource_sk),
   billed_cost                       TEXT NOT NULL DEFAULT '0',
   effective_cost                    TEXT NOT NULL DEFAULT '0',
   line_count                        INTEGER NOT NULL DEFAULT 0,
@@ -665,6 +665,7 @@ CREATE TABLE IF NOT EXISTS agg_cost_anomaly_monthly (
   pct_change_vs_avg           TEXT NOT NULL DEFAULT '0',
   history_months              INTEGER NOT NULL DEFAULT 0,
   anomaly_flag                INTEGER NOT NULL DEFAULT 0,
+  anomaly_type                TEXT NOT NULL DEFAULT 'NORMAL',
   refreshed_utc               TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (month_start, provider, entity_level, application_sk, service_sk)
 );
@@ -781,7 +782,7 @@ SELECT a.month_start, a.month_start AS billing_period_start, a.provider, a.entit
   a.application_sk, app.application_name, app.alias_values,
   a.service_sk, svc.service_name,
   a.billed_cost_current, a.billed_cost_avg_3m, a.billed_cost_stddev_3m,
-  a.z_score, a.pct_change_vs_avg, a.history_months, a.anomaly_flag, a.refreshed_utc
+  a.z_score, a.pct_change_vs_avg, a.history_months, a.anomaly_flag, a.anomaly_type, a.refreshed_utc
 FROM agg_cost_anomaly_monthly a
 INNER JOIN dim_application app ON a.application_sk = app.application_sk
 LEFT JOIN dim_service svc ON a.service_sk = svc.service_sk;
