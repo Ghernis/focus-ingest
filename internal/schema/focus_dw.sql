@@ -1551,7 +1551,7 @@ WHERE NOT EXISTS (
       AND v2.resource_sk = old.resource_sk
       AND v2.recommendation_type = old.recommendation_type
 );
-GO
+-- GO (must not be a real GO here: splitOnGO would break the block comment)
 */
 
 PRINT 'focus_dw.sql completed successfully.';
