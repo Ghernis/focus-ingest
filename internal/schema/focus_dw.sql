@@ -37,7 +37,7 @@ BEGIN
   CREATE TABLE dbo.dim_account (
     account_sk           INT IDENTITY(1,1) PRIMARY KEY,
     provider             VARCHAR(10)  NOT NULL CHECK (provider IN ('AWS','AZURE','GCP')),
-    account_id           VARCHAR(64)  NOT NULL,
+    account_id           VARCHAR(512) NOT NULL,
     account_name         VARCHAR(256) NULL,
     billing_account_type VARCHAR(64)  NULL,
     is_active            BIT NOT NULL DEFAULT 1,
@@ -51,7 +51,7 @@ BEGIN
   CREATE TABLE dbo.dim_sub_account (
     sub_account_sk    INT IDENTITY(1,1) PRIMARY KEY,
     provider          VARCHAR(10)  NOT NULL CHECK (provider IN ('AWS','AZURE','GCP')),
-    sub_account_id    VARCHAR(128) NOT NULL,
+    sub_account_id    VARCHAR(512) NOT NULL,
     sub_account_name  VARCHAR(256) NULL,
     sub_account_type  VARCHAR(64)  NULL,
     billing_account_sk INT         NULL FOREIGN KEY REFERENCES dbo.dim_account(account_sk),
@@ -322,7 +322,7 @@ BEGIN
 
     AvailabilityZone               VARCHAR(128) NULL,
     BilledCost                     DECIMAL(28,10) NULL,
-    BillingAccountId               VARCHAR(128) NULL,
+    BillingAccountId               VARCHAR(512) NULL,
     BillingAccountName             VARCHAR(256) NULL,
     BillingAccountType             VARCHAR(64)  NULL,
     BillingCurrency                VARCHAR(16)  NULL,
@@ -373,7 +373,7 @@ BEGIN
     SkuMeter                       VARCHAR(256) NULL,
     SkuPriceDetails                NVARCHAR(512) NULL,
     SkuPriceId                     VARCHAR(512) NULL,
-    SubAccountId                   VARCHAR(128) NULL,
+    SubAccountId                   VARCHAR(512) NULL,
     SubAccountName                 VARCHAR(256) NULL,
     SubAccountType                 VARCHAR(64)  NULL,
     raw_tags_json                  NVARCHAR(MAX) NULL
@@ -384,6 +384,35 @@ GO
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_stg_focus_batch' AND object_id = OBJECT_ID(N'dbo.stg_focus_cost_line'))
 BEGIN
   CREATE INDEX IX_stg_focus_batch ON dbo.stg_focus_cost_line (ingestion_batch_id);
+END
+GO
+
+-- Widen ID columns for Azure ARM paths (/providers/Microsoft.Billing/billingAccounts/...)
+IF COL_LENGTH('dbo.dim_account', 'account_id') IS NOT NULL
+   AND COL_LENGTH('dbo.dim_account', 'account_id') < 512
+BEGIN
+  ALTER TABLE dbo.dim_account ALTER COLUMN account_id VARCHAR(512) NOT NULL;
+END
+GO
+
+IF COL_LENGTH('dbo.dim_sub_account', 'sub_account_id') IS NOT NULL
+   AND COL_LENGTH('dbo.dim_sub_account', 'sub_account_id') < 512
+BEGIN
+  ALTER TABLE dbo.dim_sub_account ALTER COLUMN sub_account_id VARCHAR(512) NOT NULL;
+END
+GO
+
+IF COL_LENGTH('dbo.stg_focus_cost_line', 'BillingAccountId') IS NOT NULL
+   AND COL_LENGTH('dbo.stg_focus_cost_line', 'BillingAccountId') < 512
+BEGIN
+  ALTER TABLE dbo.stg_focus_cost_line ALTER COLUMN BillingAccountId VARCHAR(512) NULL;
+END
+GO
+
+IF COL_LENGTH('dbo.stg_focus_cost_line', 'SubAccountId') IS NOT NULL
+   AND COL_LENGTH('dbo.stg_focus_cost_line', 'SubAccountId') < 512
+BEGIN
+  ALTER TABLE dbo.stg_focus_cost_line ALTER COLUMN SubAccountId VARCHAR(512) NULL;
 END
 GO
 
