@@ -779,10 +779,15 @@ BEGIN
   IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_cost_daily_charge' AND object_id = OBJECT_ID(N'dbo.agg_cost_daily'))
     DROP INDEX IX_agg_cost_daily_charge ON dbo.agg_cost_daily;
   DECLARE @uq_daily SYSNAME;
+  DECLARE @sql NVARCHAR(MAX);
   SELECT @uq_daily = kc.name
   FROM sys.key_constraints kc
   WHERE kc.parent_object_id = OBJECT_ID(N'dbo.agg_cost_daily') AND kc.type = 'UQ';
-  IF @uq_daily IS NOT NULL EXEC(N'ALTER TABLE dbo.agg_cost_daily DROP CONSTRAINT ' + QUOTENAME(@uq_daily));
+  IF @uq_daily IS NOT NULL
+  BEGIN
+    SET @sql = N'ALTER TABLE dbo.agg_cost_daily DROP CONSTRAINT ' + QUOTENAME(@uq_daily);
+    EXEC (@sql);
+  END
   EXEC sp_rename 'dbo.agg_cost_daily.billing_account_sk', 'sub_account_sk', 'COLUMN';
   CREATE INDEX IX_agg_cost_daily_charge ON dbo.agg_cost_daily (charge_date, provider, sub_account_sk);
   ALTER TABLE dbo.agg_cost_daily ADD CONSTRAINT UQ_agg_cost_daily_grain
@@ -795,10 +800,15 @@ BEGIN
   IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_cost_daily_charge' AND object_id = OBJECT_ID(N'dbo.agg_cost_daily'))
     DROP INDEX IX_agg_cost_daily_charge ON dbo.agg_cost_daily;
   DECLARE @uq_daily_billing SYSNAME;
+  DECLARE @sql NVARCHAR(MAX);
   SELECT @uq_daily_billing = kc.name
   FROM sys.key_constraints kc
   WHERE kc.parent_object_id = OBJECT_ID(N'dbo.agg_cost_daily') AND kc.type = 'UQ';
-  IF @uq_daily_billing IS NOT NULL EXEC(N'ALTER TABLE dbo.agg_cost_daily DROP CONSTRAINT ' + QUOTENAME(@uq_daily_billing));
+  IF @uq_daily_billing IS NOT NULL
+  BEGIN
+    SET @sql = N'ALTER TABLE dbo.agg_cost_daily DROP CONSTRAINT ' + QUOTENAME(@uq_daily_billing);
+    EXEC (@sql);
+  END
   ALTER TABLE dbo.agg_cost_daily ADD billing_period_start DATE NOT NULL
     CONSTRAINT DF_agg_cost_daily_billing_period DEFAULT '1900-01-01';
   ALTER TABLE dbo.agg_cost_daily DROP CONSTRAINT DF_agg_cost_daily_billing_period;
@@ -814,10 +824,15 @@ BEGIN
   IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_cost_monthly_month' AND object_id = OBJECT_ID(N'dbo.agg_cost_monthly'))
     DROP INDEX IX_agg_cost_monthly_month ON dbo.agg_cost_monthly;
   DECLARE @uq_monthly SYSNAME;
+  DECLARE @sql NVARCHAR(MAX);
   SELECT @uq_monthly = kc.name
   FROM sys.key_constraints kc
   WHERE kc.parent_object_id = OBJECT_ID(N'dbo.agg_cost_monthly') AND kc.type = 'UQ';
-  IF @uq_monthly IS NOT NULL EXEC(N'ALTER TABLE dbo.agg_cost_monthly DROP CONSTRAINT ' + QUOTENAME(@uq_monthly));
+  IF @uq_monthly IS NOT NULL
+  BEGIN
+    SET @sql = N'ALTER TABLE dbo.agg_cost_monthly DROP CONSTRAINT ' + QUOTENAME(@uq_monthly);
+    EXEC (@sql);
+  END
   EXEC sp_rename 'dbo.agg_cost_monthly.billing_account_sk', 'sub_account_sk', 'COLUMN';
   CREATE INDEX IX_agg_cost_monthly_month ON dbo.agg_cost_monthly (month_start, provider, sub_account_sk);
   ALTER TABLE dbo.agg_cost_monthly ADD CONSTRAINT UQ_agg_cost_monthly_grain
