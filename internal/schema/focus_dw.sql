@@ -1169,14 +1169,38 @@ GO
 -- SECTION 6: FACT INDEXES (columnstore + reporting)
 -- =====================================================================
 
+-- Columnstore requires Azure SQL S3+ / Premium / vCore; skip on Basic and S0–S2 tiers.
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'CCI_fact_focus_cost_daily' AND object_id = OBJECT_ID(N'dbo.fact_focus_cost_daily'))
 BEGIN
-  CREATE NONCLUSTERED COLUMNSTORE INDEX CCI_fact_focus_cost_daily
-    ON dbo.fact_focus_cost_daily (
-      charge_date, billing_account_sk, sub_account_sk, resource_sk, service_sk,
-      sku_sk, region_sk, charge_category_sk, pricing_category_sk, commitment_sk,
-      billed_cost, effective_cost, list_cost, contracted_cost, line_count
-    );
+  IF EXISTS (
+    SELECT 1 FROM sys.dm_db_persisted_sku_features
+    WHERE feature_name = N'COLUMNSTORE'
+  )
+  BEGIN
+    CREATE NONCLUSTERED COLUMNSTORE INDEX CCI_fact_focus_cost_daily
+      ON dbo.fact_focus_cost_daily (
+        charge_date, billing_account_sk, sub_account_sk, resource_sk, service_sk,
+        sku_sk, region_sk, charge_category_sk, pricing_category_sk, commitment_sk,
+        billed_cost, effective_cost, list_cost, contracted_cost, line_count
+      );
+  END
+  ELSE
+  BEGIN
+    BEGIN TRY
+      CREATE NONCLUSTERED COLUMNSTORE INDEX CCI_fact_focus_cost_daily
+        ON dbo.fact_focus_cost_daily (
+          charge_date, billing_account_sk, sub_account_sk, resource_sk, service_sk,
+          sku_sk, region_sk, charge_category_sk, pricing_category_sk, commitment_sk,
+          billed_cost, effective_cost, list_cost, contracted_cost, line_count
+        );
+    END TRY
+    BEGIN CATCH
+      IF ERROR_MESSAGE() LIKE N'%COLUMNSTORE%'
+        PRINT N'Skipping CCI_fact_focus_cost_daily: columnstore not available on this service tier.';
+      ELSE
+        THROW;
+    END CATCH
+  END
 END
 GO
 
