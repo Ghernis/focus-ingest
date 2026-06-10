@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/shopspring/decimal"
@@ -171,10 +172,12 @@ func (p *Processor) rollupDaily(ctx context.Context, tx *sql.Tx, batchID int64, 
 			capSK = &id
 		}
 
-		key := fmt.Sprintf("%s|%d|%v|%v|%d|%v|%v|%d|%v|%v|%v|%v|%v|%v|%s|%s",
-			r.ChargeDate, accSK, subSK, resSK, svcSK, skuSK, regSK, catSK, cfSK, pcSK, cmtSK,
-			nullStr(r.CommitmentDiscountStatus), capSK, nullStr(r.CapacityReservationStatus),
-			r.ChargeDescriptionHash, r.BillingPeriodStart)
+		key := dailyGrainKey(
+			r.ChargeDate, accSK, subSK, resSK, svcSK, skuSK, regSK, catSK,
+			cfSK, pcSK, cmtSK, capSK,
+			r.CommitmentDiscountStatus, r.CapacityReservationStatus,
+			r.ChargeDescriptionHash, r.BillingPeriodStart,
+		)
 
 		g, ok := grains[key]
 		if !ok {
@@ -249,6 +252,53 @@ func (p *Processor) rollupDaily(ctx context.Context, tx *sql.Tx, batchID int64, 
 		}
 	}
 	return nil
+}
+
+// dailyGrainKey matches UQ_fact_focus_cost_daily_grain (excluding ingestion_batch_id).
+// Uses scalar values — never pointer addresses (%v on *int64 prints distinct addresses).
+func dailyGrainKey(
+	chargeDate string,
+	billingAccountSK int64,
+	subAccountSK, resourceSK *int64,
+	serviceSK int64,
+	skuSK, regionSK *int64,
+	chargeCategorySK int64,
+	chargeFrequencySK, pricingCategorySK, commitmentSK, capacitySK *int64,
+	commitmentDiscountStatus, capacityReservationStatus *string,
+	chargeDescriptionHash, billingPeriodStart string,
+) string {
+	return strings.Join([]string{
+		chargeDate,
+		strconv.FormatInt(billingAccountSK, 10),
+		ptrInt64Key(subAccountSK),
+		ptrInt64Key(resourceSK),
+		strconv.FormatInt(serviceSK, 10),
+		ptrInt64Key(skuSK),
+		ptrInt64Key(regionSK),
+		strconv.FormatInt(chargeCategorySK, 10),
+		ptrInt64Key(chargeFrequencySK),
+		ptrInt64Key(pricingCategorySK),
+		ptrInt64Key(commitmentSK),
+		ptrStrKey(commitmentDiscountStatus),
+		ptrInt64Key(capacitySK),
+		ptrStrKey(capacityReservationStatus),
+		chargeDescriptionHash,
+		billingPeriodStart,
+	}, "|")
+}
+
+func ptrInt64Key(p *int64) string {
+	if p == nil {
+		return ""
+	}
+	return strconv.FormatInt(*p, 10)
+}
+
+func ptrStrKey(p *string) string {
+	if p == nil || strings.TrimSpace(*p) == "" {
+		return ""
+	}
+	return *p
 }
 
 func (p *Processor) deleteBatchFacts(ctx context.Context, tx *sql.Tx, batchID int64) error {
