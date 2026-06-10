@@ -454,11 +454,32 @@ BEGIN
     CONSTRAINT PK_fact_focus_cost_daily PRIMARY KEY NONCLUSTERED (cost_daily_id),
     CONSTRAINT UQ_fact_focus_cost_daily_grain UNIQUE CLUSTERED (
       charge_date, billing_account_sk, sub_account_sk, resource_sk, service_sk,
-      sku_sk, region_sk, charge_category_sk, pricing_category_sk,
+      sku_sk, region_sk, charge_category_sk, charge_frequency_sk, pricing_category_sk,
       commitment_sk, commitment_discount_status, capacity_reservation_sk,
       capacity_reservation_status, charge_description_hash,
       billing_period_start, ingestion_batch_id
     )
+  );
+END
+GO
+
+-- Align unique grain with ETL rollup (includes charge_frequency_sk)
+IF EXISTS (SELECT 1 FROM sys.key_constraints WHERE name = N'UQ_fact_focus_cost_daily_grain')
+   AND NOT EXISTS (
+     SELECT 1
+     FROM sys.index_columns ic
+     INNER JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+     INNER JOIN sys.indexes i ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+     WHERE i.name = N'UQ_fact_focus_cost_daily_grain' AND c.name = N'charge_frequency_sk'
+   )
+BEGIN
+  ALTER TABLE dbo.fact_focus_cost_daily DROP CONSTRAINT UQ_fact_focus_cost_daily_grain;
+  ALTER TABLE dbo.fact_focus_cost_daily ADD CONSTRAINT UQ_fact_focus_cost_daily_grain UNIQUE CLUSTERED (
+    charge_date, billing_account_sk, sub_account_sk, resource_sk, service_sk,
+    sku_sk, region_sk, charge_category_sk, charge_frequency_sk, pricing_category_sk,
+    commitment_sk, commitment_discount_status, capacity_reservation_sk,
+    capacity_reservation_status, charge_description_hash,
+    billing_period_start, ingestion_batch_id
   );
 END
 GO

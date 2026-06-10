@@ -39,6 +39,8 @@ type Store interface {
 	Validate(ctx context.Context, batchID int64) (ValidationReport, error)
 	FindCompletedImport(ctx context.Context, sourceFile, focusVersion string) (batchID int64, found bool, err error)
 	PurgeImport(ctx context.Context, batchID int64) error
+	MarkBatchFailed(ctx context.Context, batchID int64) error
+	PurgeStaleLoading(ctx context.Context, sourceFile, focusVersion string) (int, error)
 	RebuildAggregates(ctx context.Context) error
 	RebuildTags(ctx context.Context) error
 	Close() error

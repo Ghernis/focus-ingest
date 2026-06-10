@@ -143,6 +143,14 @@ func (s *sqlserverStore) PurgeImport(ctx context.Context, batchID int64) error {
 	return purgeBatch(ctx, s.db, "sqlserver", batchID)
 }
 
+func (s *sqlserverStore) MarkBatchFailed(ctx context.Context, batchID int64) error {
+	return MarkBatchFailed(ctx, s.db, "sqlserver", batchID)
+}
+
+func (s *sqlserverStore) PurgeStaleLoading(ctx context.Context, sourceFile, focusVersion string) (int, error) {
+	return PurgeLoadingBatchesForFile(ctx, s.db, "sqlserver", sourceFile, focusVersion)
+}
+
 func (s *sqlserverStore) RebuildAggregates(ctx context.Context) error {
 	return (&etl.Processor{DB: s.db, Dialect: "sqlserver"}).RebuildAggregates(ctx)
 }

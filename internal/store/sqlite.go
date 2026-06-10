@@ -129,6 +129,14 @@ func (s *sqliteStore) PurgeImport(ctx context.Context, batchID int64) error {
 	return purgeBatch(ctx, s.db, "sqlite", batchID)
 }
 
+func (s *sqliteStore) MarkBatchFailed(ctx context.Context, batchID int64) error {
+	return MarkBatchFailed(ctx, s.db, "sqlite", batchID)
+}
+
+func (s *sqliteStore) PurgeStaleLoading(ctx context.Context, sourceFile, focusVersion string) (int, error) {
+	return PurgeLoadingBatchesForFile(ctx, s.db, "sqlite", sourceFile, focusVersion)
+}
+
 func (s *sqliteStore) RebuildAggregates(ctx context.Context) error {
 	return (&etl.Processor{DB: s.db, Dialect: "sqlite"}).RebuildAggregates(ctx)
 }

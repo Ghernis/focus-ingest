@@ -306,7 +306,7 @@ CREATE TABLE IF NOT EXISTS fact_focus_cost_daily (
   created_utc                TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (
     charge_date, billing_account_sk, sub_account_sk, resource_sk, service_sk,
-    sku_sk, region_sk, charge_category_sk, pricing_category_sk,
+    sku_sk, region_sk, charge_category_sk, charge_frequency_sk, pricing_category_sk,
     commitment_sk, commitment_discount_status, capacity_reservation_sk,
     capacity_reservation_status, charge_description_hash,
     billing_period_start, ingestion_batch_id

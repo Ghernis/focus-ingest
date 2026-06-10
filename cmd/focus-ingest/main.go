@@ -130,6 +130,12 @@ func importCmd() *cobra.Command {
 					}
 				}
 
+				if n, err := s.PurgeStaleLoading(ctx, sourceFile, focusVersion); err != nil {
+					return err
+				} else if n > 0 {
+					fmt.Printf("Purged %d incomplete LOADING batch(es) for %s\n", n, sourceFile)
+				}
+
 				meta := store.BatchMeta{
 					SourceProvider: "MIXED",
 					FocusVersion:   focusVersion,
@@ -152,6 +158,7 @@ func importCmd() *cobra.Command {
 
 				t1 := time.Now()
 				if err := s.ProcessBatch(ctx, id, focusVersion); err != nil {
+					_ = s.MarkBatchFailed(ctx, id)
 					return fmt.Errorf("etl batch %d: %w", id, err)
 				}
 				fmt.Printf("  ETL complete for batch %d in %s\n", id, time.Since(t1).Round(time.Millisecond))
