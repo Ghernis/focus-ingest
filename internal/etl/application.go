@@ -44,11 +44,30 @@ func (p *Processor) applicationDimJoin() string {
 	return fmt.Sprintf("INNER JOIN dim_application da ON da.application_name = %s", canon)
 }
 
-func (p *Processor) ensureDefaultApplication(ctx context.Context, tx *sql.Tx) error {
-	return p.upsertApplicationAlias(ctx, tx, focus.UnassignedApplication, "")
+func (p *Processor) ensureDefaultApplication(ctx context.Context, tx *sql.Tx, cache applicationAliasCache) error {
+	return p.upsertApplicationAlias(ctx, tx, focus.UnassignedApplication, "", cache)
 }
 
-func (p *Processor) upsertApplicationAlias(ctx context.Context, tx *sql.Tx, raw, firstSeen string) error {
+type applicationAliasCache map[string]string
+
+func (p *Processor) loadApplicationAliasCache(ctx context.Context, tx *sql.Tx) (applicationAliasCache, error) {
+	cache := applicationAliasCache{}
+	rows, err := tx.QueryContext(ctx, p.q(`SELECT application_name, COALESCE(alias_values, '') FROM dim_application`))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name, aliases string
+		if err := rows.Scan(&name, &aliases); err != nil {
+			return nil, err
+		}
+		cache[name] = aliases
+	}
+	return cache, rows.Err()
+}
+
+func (p *Processor) upsertApplicationAlias(ctx context.Context, tx *sql.Tx, raw, firstSeen string, cache applicationAliasCache) error {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		raw = focus.UnassignedApplication
@@ -56,58 +75,81 @@ func (p *Processor) upsertApplicationAlias(ctx context.Context, tx *sql.Tx, raw,
 	canon := focus.ResolveApplicationName(raw)
 	firstSeen = focus.DateOnly(strings.TrimSpace(firstSeen))
 
-	var existingAliases sql.NullString
-	err := tx.QueryRowContext(ctx, p.q(`
-		SELECT alias_values FROM dim_application WHERE application_name = ?`), canon).Scan(&existingAliases)
-	if err != nil && err != sql.ErrNoRows {
-		return err
+	var existingAliases string
+	var known bool
+	if cache != nil {
+		existingAliases, known = cache[canon]
+	}
+	if !known {
+		var scanned sql.NullString
+		err := tx.QueryRowContext(ctx, p.q(`
+			SELECT alias_values FROM dim_application WHERE application_name = ?`), canon).Scan(&scanned)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		if err == nil {
+			existingAliases = scanned.String
+			known = true
+			if cache != nil {
+				cache[canon] = existingAliases
+			}
+		}
 	}
 
-	if err == nil {
-		merged := focus.MergeAliasValues(existingAliases.String, raw)
-		normExisting := strings.TrimSpace(strings.ReplaceAll(existingAliases.String, ",", "|"))
+	if known {
+		merged := focus.MergeAliasValues(existingAliases, raw)
+		normExisting := strings.TrimSpace(strings.ReplaceAll(existingAliases, ",", "|"))
 		if merged == normExisting {
 			return nil
 		}
+		var err error
 		if p.Dialect == "sqlite" {
 			_, err = tx.ExecContext(ctx, `
 				UPDATE dim_application SET alias_values = ?, updated_utc = datetime('now')
 				WHERE application_name = ?`, nullIfEmptyAlias(merged), canon)
-			return err
+		} else {
+			_, err = tx.ExecContext(ctx, `
+				UPDATE dim_application SET alias_values = @p1, updated_utc = SYSUTCDATETIME()
+				WHERE application_name = @p2`, nullIfEmptyAlias(merged), canon)
 		}
-		_, err = tx.ExecContext(ctx, `
-			UPDATE dim_application SET alias_values = @p1, updated_utc = SYSUTCDATETIME()
-			WHERE application_name = @p2`, nullIfEmptyAlias(merged), canon)
+		if err == nil && cache != nil {
+			cache[canon] = merged
+		}
 		return err
 	}
 
 	aliases := raw
+	var err error
 	if p.Dialect == "sqlite" {
 		if firstSeen == "" {
 			_, err = tx.ExecContext(ctx, `
 				INSERT INTO dim_application (application_name, alias_values, first_seen_date, created_utc, updated_utc)
 				VALUES (?, ?, date('now'), datetime('now'), datetime('now'))`,
 				canon, nullIfEmptyAlias(aliases))
-			return err
+		} else {
+			_, err = tx.ExecContext(ctx, `
+				INSERT INTO dim_application (application_name, alias_values, first_seen_date, created_utc, updated_utc)
+				VALUES (?, ?, ?, datetime('now'), datetime('now'))`,
+				canon, nullIfEmptyAlias(aliases), firstSeen)
 		}
-		_, err = tx.ExecContext(ctx, `
-			INSERT INTO dim_application (application_name, alias_values, first_seen_date, created_utc, updated_utc)
-			VALUES (?, ?, ?, datetime('now'), datetime('now'))`,
-			canon, nullIfEmptyAlias(aliases), firstSeen)
-		return err
-	}
-
-	if firstSeen == "" {
+	} else if firstSeen == "" {
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO dim_application (application_name, alias_values, first_seen_date, created_utc, updated_utc)
 			VALUES (@p1, @p2, CAST(SYSUTCDATETIME() AS DATE), SYSUTCDATETIME(), SYSUTCDATETIME())`,
 			canon, nullIfEmptyAlias(aliases))
-		return err
+	} else {
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO dim_application (application_name, alias_values, first_seen_date, created_utc, updated_utc)
+			VALUES (@p1, @p2, @p3, SYSUTCDATETIME(), SYSUTCDATETIME())`,
+			canon, nullIfEmptyAlias(aliases), firstSeen)
 	}
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO dim_application (application_name, alias_values, first_seen_date, created_utc, updated_utc)
-		VALUES (@p1, @p2, @p3, SYSUTCDATETIME(), SYSUTCDATETIME())`,
-		canon, nullIfEmptyAlias(aliases), firstSeen)
+	if err == nil && cache != nil {
+		if s, ok := nullIfEmptyAlias(aliases).(string); ok {
+			cache[canon] = s
+		} else {
+			cache[canon] = ""
+		}
+	}
 	return err
 }
 
@@ -119,7 +161,11 @@ func nullIfEmptyAlias(s string) interface{} {
 }
 
 func (p *Processor) syncApplicationsFromRows(ctx context.Context, tx *sql.Tx, rows []normRow) error {
-	if err := p.ensureDefaultApplication(ctx, tx); err != nil {
+	cache, err := p.loadApplicationAliasCache(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if err := p.ensureDefaultApplication(ctx, tx, cache); err != nil {
 		return err
 	}
 	seen := map[string]struct{}{}
@@ -133,7 +179,7 @@ func (p *Processor) syncApplicationsFromRows(ctx context.Context, tx *sql.Tx, ro
 			continue
 		}
 		seen[key] = struct{}{}
-		if err := p.upsertApplicationAlias(ctx, tx, raw, r.ChargeDate); err != nil {
+		if err := p.upsertApplicationAlias(ctx, tx, raw, r.ChargeDate, cache); err != nil {
 			return err
 		}
 	}
@@ -141,7 +187,11 @@ func (p *Processor) syncApplicationsFromRows(ctx context.Context, tx *sql.Tx, ro
 }
 
 func (p *Processor) syncApplicationsFromFacts(ctx context.Context, tx *sql.Tx) error {
-	if err := p.ensureDefaultApplication(ctx, tx); err != nil {
+	cache, err := p.loadApplicationAliasCache(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if err := p.ensureDefaultApplication(ctx, tx, cache); err != nil {
 		return err
 	}
 
@@ -163,7 +213,7 @@ func (p *Processor) syncApplicationsFromFacts(ctx context.Context, tx *sql.Tx) e
 		if err := rows.Scan(&raw, &firstSeen); err != nil {
 			return err
 		}
-		if err := p.upsertApplicationAlias(ctx, tx, raw, firstSeen); err != nil {
+		if err := p.upsertApplicationAlias(ctx, tx, raw, firstSeen, cache); err != nil {
 			return err
 		}
 	}
@@ -191,7 +241,7 @@ func (p *Processor) syncApplicationsFromFacts(ctx context.Context, tx *sql.Tx) e
 		if err := rows.Scan(&raw, &firstSeen); err != nil {
 			return err
 		}
-		if err := p.upsertApplicationAlias(ctx, tx, raw, firstSeen); err != nil {
+		if err := p.upsertApplicationAlias(ctx, tx, raw, firstSeen, cache); err != nil {
 			return err
 		}
 	}
@@ -203,7 +253,7 @@ func (p *Processor) lookupApplicationSK(ctx context.Context, tx *sql.Tx, raw str
 	var sk int64
 	err := tx.QueryRowContext(ctx, p.q(`SELECT application_sk FROM dim_application WHERE application_name = ?`), canon).Scan(&sk)
 	if err == sql.ErrNoRows {
-		if err := p.upsertApplicationAlias(ctx, tx, raw, ""); err != nil {
+		if err := p.upsertApplicationAlias(ctx, tx, raw, "", nil); err != nil {
 			return nil, err
 		}
 		err = tx.QueryRowContext(ctx, p.q(`SELECT application_sk FROM dim_application WHERE application_name = ?`), canon).Scan(&sk)

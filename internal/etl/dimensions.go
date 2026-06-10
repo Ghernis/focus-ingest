@@ -83,9 +83,15 @@ func (p *Processor) upsertDimensions(ctx context.Context, tx *sql.Tx, rows []nor
 	if err := p.refreshDimCache(ctx, tx, cache); err != nil {
 		return err
 	}
-	for _, r := range resources {
-		if err := p.upsertResource(ctx, tx, r, cache); err != nil {
+	if p.Dialect == "sqlserver" {
+		if err := p.upsertResourcesBulkSQLServer(ctx, tx, resources, cache); err != nil {
 			return err
+		}
+	} else {
+		for _, r := range resources {
+			if err := p.upsertResource(ctx, tx, r, cache); err != nil {
+				return err
+			}
 		}
 	}
 	return p.syncApplicationsFromRows(ctx, tx, rows)

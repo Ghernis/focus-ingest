@@ -222,36 +222,7 @@ func (p *Processor) rollupDaily(ctx context.Context, tx *sql.Tx, batchID int64, 
 		}
 	}
 
-	ins := p.q(`INSERT INTO fact_focus_cost_daily (
-		charge_date, billing_account_sk, sub_account_sk, resource_sk, service_sk, sku_sk, region_sk,
-		charge_category_sk, charge_frequency_sk, pricing_category_sk, commitment_sk,
-		commitment_discount_status, capacity_reservation_sk, capacity_reservation_status,
-		charge_description_hash, billing_period_start, billing_period_end,
-		billed_cost, effective_cost, list_cost, contracted_cost,
-		pricing_quantity, consumed_quantity, commitment_discount_quantity, line_count,
-		first_charge_period_start, last_charge_period_end, ingestion_batch_id, focus_version
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-
-	stmt, err := tx.PrepareContext(ctx, ins)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
-	for _, g := range grains {
-		_, err := stmt.ExecContext(ctx,
-			g.ChargeDate, g.BillingAccountSK, g.SubAccountSK, g.ResourceSK, g.ServiceSK, g.SkuSK, g.RegionSK,
-			g.ChargeCategorySK, g.ChargeFrequencySK, g.PricingCategorySK, g.CommitmentSK,
-			g.CommitmentDiscountStatus, g.CapacitySK, g.CapacityStatus,
-			g.ChargeDescriptionHash, g.BillingPeriodStart, g.BillingPeriodEnd,
-			g.Billed.String(), g.Effective.String(), g.List.String(), g.Contracted.String(),
-			g.PricingQty.String(), g.ConsumedQty.String(), g.CommitmentQty.String(), g.LineCount,
-			nullIfEmpty(g.FirstCharge), nullIfEmpty(g.LastCharge), batchID, focusVersion)
-		if err != nil {
-			return fmt.Errorf("insert daily fact: %w", err)
-		}
-	}
-	return nil
+	return p.insertDailyGrains(ctx, tx, grains, batchID, focusVersion)
 }
 
 // dailyGrainKey matches UQ_fact_focus_cost_daily_grain (excluding ingestion_batch_id).

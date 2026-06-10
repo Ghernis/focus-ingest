@@ -28,8 +28,28 @@ func OpenSQLServer(connection string, skipTags bool, skipAggregates bool) (Store
 		db.Close()
 		return nil, fmt.Errorf("sql server ping: %w", err)
 	}
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
 	return &sqlserverStore{db: db, skipTags: skipTags, skipAggregates: skipAggregates}, nil
 }
+
+const stgInsertCols = 57
+
+const stgInsertPrefixSQL = `
+			INSERT INTO stg_focus_cost_line (
+			  ingestion_batch_id, source_provider, focus_version, source_file,
+			  BilledCost, BillingAccountId, BillingAccountName, BillingAccountType, BillingCurrency,
+			  BillingPeriodEnd, BillingPeriodStart, CapacityReservationId, CapacityReservationStatus,
+			  ChargeCategory, ChargeClass, ChargeDescription, ChargeFrequency, ChargePeriodEnd, ChargePeriodStart,
+			  CommitmentDiscountCategory, CommitmentDiscountId, CommitmentDiscountName, CommitmentDiscountQuantity,
+			  CommitmentDiscountStatus, CommitmentDiscountType, CommitmentDiscountUnit,
+			  ConsumedQuantity, ConsumedUnit, ContractedCost, ContractedUnitPrice, EffectiveCost,
+			  InvoiceId, InvoiceIssuer, ListCost, ListUnitPrice, PricingCategory, PricingCurrency,
+			  PricingQuantity, PricingUnit, Provider, Publisher, RegionId, RegionName,
+			  ResourceId, ResourceName, ResourceType, ServiceCategory, ServiceName, ServiceSubcategory,
+			  SkuId, SkuMeter, SkuPriceDetails, SkuPriceId, SubAccountId, SubAccountName, SubAccountType,
+			  raw_tags_json
+			) VALUES `
 
 func (s *sqlserverStore) Dialect() string { return "sqlserver" }
 
@@ -86,42 +106,12 @@ func (s *sqlserverStore) InsertStaging(ctx context.Context, batchID int64, focus
 	}
 	defer tx.Rollback()
 
-	for _, r := range rows {
-		_, err = tx.ExecContext(ctx, `
-			INSERT INTO stg_focus_cost_line (
-			  ingestion_batch_id, source_provider, focus_version, source_file,
-			  BilledCost, BillingAccountId, BillingAccountName, BillingAccountType, BillingCurrency,
-			  BillingPeriodEnd, BillingPeriodStart, CapacityReservationId, CapacityReservationStatus,
-			  ChargeCategory, ChargeClass, ChargeDescription, ChargeFrequency, ChargePeriodEnd, ChargePeriodStart,
-			  CommitmentDiscountCategory, CommitmentDiscountId, CommitmentDiscountName, CommitmentDiscountQuantity,
-			  CommitmentDiscountStatus, CommitmentDiscountType, CommitmentDiscountUnit,
-			  ConsumedQuantity, ConsumedUnit, ContractedCost, ContractedUnitPrice, EffectiveCost,
-			  InvoiceId, InvoiceIssuer, ListCost, ListUnitPrice, PricingCategory, PricingCurrency,
-			  PricingQuantity, PricingUnit, Provider, Publisher, RegionId, RegionName,
-			  ResourceId, ResourceName, ResourceType, ServiceCategory, ServiceName, ServiceSubcategory,
-			  SkuId, SkuMeter, SkuPriceDetails, SkuPriceId, SubAccountId, SubAccountName, SubAccountType,
-			  raw_tags_json
-			) VALUES (
-			  @p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15,@p16,@p17,@p18,@p19,
-			  @p20,@p21,@p22,@p23,@p24,@p25,@p26,@p27,@p28,@p29,@p30,@p31,@p32,@p33,@p34,@p35,@p36,
-			  @p37,@p38,@p39,@p40,@p41,@p42,@p43,@p44,@p45,@p46,@p47,@p48,@p49,@p50,@p51,@p52,@p53,@p54,@p55,@p56,@p57
-			)`,
-			batchID, r.SourceProvider, focusVersion, sourceFile,
-			nullStr(r.BilledCost), nullStr(r.BillingAccountId), nullStr(r.BillingAccountName), nullStr(r.BillingAccountType), nullStr(r.BillingCurrency),
-			nullStr(r.BillingPeriodEnd), nullStr(r.BillingPeriodStart), nullStr(r.CapacityReservationId), nullStr(r.CapacityReservationStatus),
-			nullStr(r.ChargeCategory), nullStr(r.ChargeClass), nullStr(r.ChargeDescription), nullStr(r.ChargeFrequency), nullStr(r.ChargePeriodEnd), nullStr(r.ChargePeriodStart),
-			nullStr(r.CommitmentDiscountCategory), nullStr(r.CommitmentDiscountId), nullStr(r.CommitmentDiscountName), nullStr(r.CommitmentDiscountQuantity),
-			nullStr(r.CommitmentDiscountStatus), nullStr(r.CommitmentDiscountType), nullStr(r.CommitmentDiscountUnit),
-			nullStr(r.ConsumedQuantity), nullStr(r.ConsumedUnit), nullStr(r.ContractedCost), nullStr(r.ContractedUnitPrice), nullStr(r.EffectiveCost),
-			nullStr(r.InvoiceId), nullStr(r.InvoiceIssuer), nullStr(r.ListCost), nullStr(r.ListUnitPrice), nullStr(r.PricingCategory), nullStr(r.PricingCurrency),
-			nullStr(r.PricingQuantity), nullStr(r.PricingUnit), nullStr(r.Provider), nullStr(r.Publisher), nullStr(r.RegionId), nullStr(r.RegionName),
-			nullStr(r.ResourceId), nullStr(r.ResourceName), nullStr(r.ResourceType), nullStr(r.ServiceCategory), nullStr(r.ServiceName), nullStr(r.ServiceSubcategory),
-			nullStr(r.SkuId), nullStr(r.SkuMeter), nullStr(r.SkuPriceDetails), nullStr(r.SkuPriceId), nullStr(r.SubAccountId), nullStr(r.SubAccountName), nullStr(r.SubAccountType),
-			nullStr(r.RawTagsJSON),
-		)
-		if err != nil {
-			return err
-		}
+	buf := make([][]interface{}, len(rows))
+	for i, r := range rows {
+		buf[i] = stagingRowArgs(batchID, focusVersion, sourceFile, r)
+	}
+	if err := execSQLServerMultiInsert(ctx, tx, stgInsertPrefixSQL, stgInsertCols, buf); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
