@@ -36,13 +36,17 @@ func (s *sqlserverStore) Dialect() string { return "sqlserver" }
 func (s *sqlserverStore) Close() error { return s.db.Close() }
 
 func (s *sqlserverStore) ApplySchema(ctx context.Context) error {
-	for _, batch := range splitOnGO(schema.SQLServerDDL) {
+	for i, batch := range splitOnGO(schema.SQLServerDDL) {
 		batch = strings.TrimSpace(batch)
 		if batch == "" {
 			continue
 		}
 		if _, err := s.db.ExecContext(ctx, batch); err != nil {
-			return fmt.Errorf("schema apply: %w", err)
+			snippet := batch
+			if len(snippet) > 200 {
+				snippet = snippet[:200] + "..."
+			}
+			return fmt.Errorf("schema apply batch %d: %w\nbatch start: %s", i+1, err, snippet)
 		}
 	}
 	return nil

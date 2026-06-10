@@ -1294,7 +1294,7 @@ LEFT JOIN dbo.fact_recommendation_metrics m ON r.rec_snapshot_id = m.rec_snapsho
 GROUP BY
     r.rec_snapshot_id, r.snapshot_month, r.recommendation_type, r.current_utilization_status,
     r.terminate_recommendation, res.name, res.resource_type, res.region, res.owner_email,
-    res.environment, acc.provider, sa.sub_account_name AS account_name, svc.service_name,
+    res.environment, acc.provider, sa.sub_account_name, svc.service_name,
     r.current_instance_type, r.current_vcpu, r.current_memory_gb,
     r.recommended_instance_type, r.recommended_vcpu, r.recommended_memory_gb,
     r.current_monthly_price, r.projected_monthly_price, r.projected_monthly_savings,
