@@ -21,20 +21,22 @@ type Config struct {
 	FocusVersion string
 	BatchSize    int
 	BatchID      int64
-	SkipTags     bool
+	SkipTags       bool
 	SkipAggregates bool
+	UseGoETL       bool // SQL Server only: row-by-row Go ETL instead of set-based SQL
 }
 
-func FromFlags(local, sqlite bool, sqlitePath, connection, focusVersion string, batchSize int, batchID int64, skipTags bool, skipAggregates bool) (Config, error) {
+func FromFlags(local, sqlite bool, sqlitePath, connection, focusVersion string, batchSize int, batchID int64, skipTags, skipAggregates, useGoETL bool) (Config, error) {
 	cfg := Config{
-		Local:        local || sqlite,
-		SQLitePath:   sqlitePath,
-		Connection:   connection,
-		FocusVersion: focusVersion,
-		BatchSize:    batchSize,
-		BatchID:      batchID,
-		SkipTags:     skipTags,
+		Local:          local || sqlite,
+		SQLitePath:     sqlitePath,
+		Connection:     connection,
+		FocusVersion:   focusVersion,
+		BatchSize:      batchSize,
+		BatchID:        batchID,
+		SkipTags:       skipTags,
 		SkipAggregates: skipAggregates,
+		UseGoETL:       useGoETL,
 	}
 	if cfg.SQLitePath == "" {
 		cfg.SQLitePath = DefaultSQLitePath

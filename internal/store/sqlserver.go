@@ -17,9 +17,10 @@ type sqlserverStore struct {
 	db             *sql.DB
 	skipTags       bool
 	skipAggregates bool
+	useGoETL       bool
 }
 
-func OpenSQLServer(connection string, skipTags bool, skipAggregates bool) (Store, error) {
+func OpenSQLServer(connection string, skipTags, skipAggregates, useGoETL bool) (Store, error) {
 	db, err := sql.Open("sqlserver", connection)
 	if err != nil {
 		return nil, err
@@ -30,7 +31,7 @@ func OpenSQLServer(connection string, skipTags bool, skipAggregates bool) (Store
 	}
 	db.SetMaxOpenConns(10)
 	db.SetMaxIdleConns(5)
-	return &sqlserverStore{db: db, skipTags: skipTags, skipAggregates: skipAggregates}, nil
+	return &sqlserverStore{db: db, skipTags: skipTags, skipAggregates: skipAggregates, useGoETL: useGoETL}, nil
 }
 
 const stgInsertCols = 57
@@ -117,7 +118,10 @@ func (s *sqlserverStore) InsertStaging(ctx context.Context, batchID int64, focus
 }
 
 func (s *sqlserverStore) ProcessBatch(ctx context.Context, batchID int64, focusVersion string) error {
-	p := &etl.Processor{DB: s.db, Dialect: "sqlserver", SkipTags: s.skipTags, SkipAggregates: s.skipAggregates}
+	p := &etl.Processor{
+		DB: s.db, Dialect: "sqlserver",
+		SkipTags: s.skipTags, SkipAggregates: s.skipAggregates, UseGoETL: s.useGoETL,
+	}
 	return p.ProcessBatch(ctx, batchID, focusVersion)
 }
 

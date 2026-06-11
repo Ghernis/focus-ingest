@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/shopspring/decimal"
@@ -17,6 +16,7 @@ type Processor struct {
 	Dialect        string // "sqlite" or "sqlserver"
 	SkipTags       bool
 	SkipAggregates bool
+	UseGoETL       bool // SQL Server only: force row-by-row Go ETL instead of set-based SQL
 }
 
 type normRow struct {
@@ -29,43 +29,6 @@ type normRow struct {
 	PricingCategoryNorm  string
 	ChargeDescriptionHash string
 	ServiceCode          string
-}
-
-func (p *Processor) ProcessBatch(ctx context.Context, batchID int64, focusVersion string) error {
-	rows, err := p.loadNormalized(ctx, batchID)
-	if err != nil {
-		return err
-	}
-	if len(rows) == 0 {
-		return fmt.Errorf("batch %d: no valid staging rows", batchID)
-	}
-
-	tx, err := p.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if err := p.upsertDimensions(ctx, tx, rows); err != nil {
-		return err
-	}
-	if err := p.rollupDaily(ctx, tx, batchID, focusVersion, rows); err != nil {
-		return err
-	}
-	if !p.SkipTags {
-		if err := p.buildTags(ctx, tx, batchID, rows); err != nil {
-			return err
-		}
-	}
-	if !p.SkipAggregates {
-		if err := p.rebuildAggregates(ctx, tx); err != nil {
-			return err
-		}
-	}
-	if err := p.updateBatchStatus(ctx, tx, batchID, int64(len(rows))); err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 type rowQuerier interface {

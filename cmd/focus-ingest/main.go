@@ -25,6 +25,7 @@ var (
 	batchID        int64
 	skipTags       bool
 	skipAggregates bool
+	useGoETL       bool
 	forceImport    bool
 	rebuildTags    bool
 	rebuildAggs    bool
@@ -45,6 +46,7 @@ func main() {
 	root.PersistentFlags().Int64Var(&batchID, "batch-id", 0, "Ingestion batch id (validate command)")
 	root.PersistentFlags().BoolVar(&skipTags, "skip-tags", false, "Skip tag bridge during import (use rebuild tags after bulk load)")
 	root.PersistentFlags().BoolVar(&skipAggregates, "skip-aggregates", false, "Skip rebuilding aggregate tables during import (use rebuild aggregates after bulk load)")
+	root.PersistentFlags().BoolVar(&useGoETL, "go-etl", false, "SQL Server only: use Go row-by-row ETL instead of set-based SQL (slower; debugging)")
 	root.PersistentFlags().BoolVar(&forceImport, "force", false, "Re-import a file even if it was already processed successfully")
 
 	root.AddCommand(schemaCmd())
@@ -58,7 +60,7 @@ func main() {
 }
 
 func loadConfig() (config.Config, error) {
-	return config.FromFlags(useLocal || useSQLite, useSQLite, sqlitePath, connection, focusVersion, batchSize, batchID, skipTags, skipAggregates)
+	return config.FromFlags(useLocal || useSQLite, useSQLite, sqlitePath, connection, focusVersion, batchSize, batchID, skipTags, skipAggregates, useGoETL)
 }
 
 func openStore() (store.Store, error) {

@@ -5,19 +5,15 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-)
 
-// sqlServerMaxParams is the per-statement parameter limit (2100).
-const sqlServerMaxParams = 2100
+	"github.com/ghernis/focus_dt/internal/sqlserver"
+)
 
 func execSQLServerMultiInsert(ctx context.Context, tx *sql.Tx, prefixSQL string, colsPerRow int, rows [][]interface{}) error {
 	if len(rows) == 0 {
 		return nil
 	}
-	chunk := sqlServerMaxParams / colsPerRow
-	if chunk < 1 {
-		chunk = 1
-	}
+	chunk := sqlserver.ChunkRows(colsPerRow)
 	for start := 0; start < len(rows); start += chunk {
 		end := start + chunk
 		if end > len(rows) {
@@ -52,6 +48,9 @@ func execSQLServerInsertChunk(ctx context.Context, tx *sql.Tx, prefixSQL string,
 		}
 		b.WriteByte(')')
 		args = append(args, row...)
+	}
+	if err := sqlserver.CheckParamCount(len(args)); err != nil {
+		return fmt.Errorf("staging insert chunk (%d rows x %d cols): %w", len(rows), colsPerRow, err)
 	}
 	_, err := tx.ExecContext(ctx, b.String(), args...)
 	return err

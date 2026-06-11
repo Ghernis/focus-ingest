@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ghernis/focus_dt/internal/focus"
+	"github.com/ghernis/focus_dt/internal/sqlserver"
 )
 
 const factInsertCols = 29
@@ -29,10 +30,7 @@ func (p *Processor) insertDailyGrains(ctx context.Context, tx *sql.Tx, grains ma
 	for _, g := range grains {
 		list = append(list, g)
 	}
-	chunk := 2100 / factInsertCols
-	if chunk < 1 {
-		chunk = 1
-	}
+	chunk := sqlserver.ChunkRows(factInsertCols)
 	for start := 0; start < len(list); start += chunk {
 		end := start + chunk
 		if end > len(list) {
@@ -90,6 +88,9 @@ func (p *Processor) insertDailyGrainChunk(ctx context.Context, tx *sql.Tx, grain
 		}
 		b.WriteByte(')')
 		args = append(args, dailyGrainArgs(g, batchID, focusVersion)...)
+	}
+	if err := sqlserver.CheckParamCount(len(args)); err != nil {
+		return fmt.Errorf("daily fact insert chunk (%d rows): %w", len(grains), err)
 	}
 	_, err := tx.ExecContext(ctx, b.String(), args...)
 	return err
@@ -190,7 +191,7 @@ func (p *Processor) upsertResourcesBulkSQLServer(ctx context.Context, tx *sql.Tx
 	}
 
 	const resCols = 15
-	chunk := 2100 / resCols
+	chunk := sqlserver.ChunkRows(resCols)
 	prefix := `INSERT INTO #res_stg (
 			provider, global_resource_id, resource_type, account_sk, sub_account_sk, service_sk,
 			region, name, application, environment, business, cost_center, owner_email, tags_json, valid_from
@@ -254,6 +255,9 @@ func (p *Processor) insertResourceStagingChunk(ctx context.Context, tx *sql.Tx, 
 			r.provider, r.resourceID, r.rtype, r.accountSK, r.subSK, r.serviceSK,
 			r.region, r.name, r.application, r.environment, r.business, r.costCenter, r.ownerEmail, r.tagsJSON, r.validFrom,
 		)
+	}
+	if err := sqlserver.CheckParamCount(len(args)); err != nil {
+		return fmt.Errorf("resource staging insert chunk (%d rows): %w", len(rows), err)
 	}
 	_, err := tx.ExecContext(ctx, b.String(), args...)
 	return err

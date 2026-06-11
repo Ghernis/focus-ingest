@@ -11,7 +11,7 @@ func New(cfg config.Config) (Store, error) {
 	if cfg.Local {
 		return OpenSQLite(cfg.SQLitePath, cfg.SkipTags, cfg.SkipAggregates)
 	}
-	return OpenSQLServer(cfg.Connection, cfg.SkipTags, cfg.SkipAggregates)
+	return OpenSQLServer(cfg.Connection, cfg.SkipTags, cfg.SkipAggregates, cfg.UseGoETL)
 }
 
 func MustNew(cfg config.Config) Store {
