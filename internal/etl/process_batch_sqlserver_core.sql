@@ -33,7 +33,14 @@ SELECT
   END AS pricing_category_norm,
   CONVERT(CHAR(64), HASHBYTES('SHA2_256', COALESCE(s.ChargeDescription, N'')), 2) AS charge_description_hash,
   NULLIF(LTRIM(RTRIM(s.SkuId)), '') AS sku_id_norm,
-  NULLIF(LTRIM(RTRIM(s.SkuPriceId)), '') AS sku_price_id_norm
+  NULLIF(LTRIM(RTRIM(s.SkuPriceId)), '') AS sku_price_id_norm,
+  COALESCE(NULLIF(LTRIM(RTRIM(s.ServiceName)), ''), 'UNKNOWN') AS service_code_norm,
+  NULLIF(LTRIM(RTRIM(s.SubAccountId)), '') AS sub_account_id_norm,
+  NULLIF(LTRIM(RTRIM(s.RegionId)), '') AS region_id_norm,
+  NULLIF(LTRIM(RTRIM(s.ResourceId)), '') AS resource_id_norm,
+  NULLIF(LTRIM(RTRIM(s.CommitmentDiscountId)), '') AS commitment_discount_id_norm,
+  NULLIF(LTRIM(RTRIM(s.CapacityReservationId)), '') AS capacity_reservation_id_norm,
+  NULLIF(LTRIM(RTRIM(s.ChargeFrequency)), '') AS charge_frequency_norm
 INTO #stg_norm
 FROM dbo.stg_focus_cost_line s
 WHERE s.ingestion_batch_id = @IngestionBatchId
@@ -47,12 +54,13 @@ DELETE FROM #stg_norm WHERE provider_code IS NULL;
 -- ---------------------------------------------------------------------
 MERGE dbo.dim_account AS t
 USING (
-  SELECT DISTINCT
+  SELECT
     provider_code AS provider,
     BillingAccountId AS account_id,
-    BillingAccountName AS account_name,
-    BillingAccountType AS billing_account_type
+    MAX(BillingAccountName) AS account_name,
+    MAX(BillingAccountType) AS billing_account_type
   FROM #stg_norm
+  GROUP BY provider_code, BillingAccountId
 ) AS s
 ON t.provider = s.provider AND t.account_id = s.account_id
 WHEN MATCHED THEN UPDATE SET
@@ -66,16 +74,17 @@ WHEN NOT MATCHED THEN INSERT (provider, account_id, account_name, billing_accoun
 -- ---------------------------------------------------------------------
 MERGE dbo.dim_sub_account AS t
 USING (
-  SELECT DISTINCT
+  SELECT
     n.provider_code AS provider,
-    n.SubAccountId AS sub_account_id,
-    n.SubAccountName AS sub_account_name,
-    n.SubAccountType AS sub_account_type,
-    a.account_sk AS billing_account_sk
+    n.sub_account_id_norm AS sub_account_id,
+    MAX(n.SubAccountName) AS sub_account_name,
+    MAX(n.SubAccountType) AS sub_account_type,
+    MAX(a.account_sk) AS billing_account_sk
   FROM #stg_norm n
   INNER JOIN dbo.dim_account a
     ON a.provider = n.provider_code AND a.account_id = n.BillingAccountId
-  WHERE n.SubAccountId IS NOT NULL
+  WHERE n.sub_account_id_norm IS NOT NULL
+  GROUP BY n.provider_code, n.sub_account_id_norm
 ) AS s
 ON t.provider = s.provider AND t.sub_account_id = s.sub_account_id
 WHEN MATCHED THEN UPDATE SET
@@ -90,13 +99,14 @@ WHEN NOT MATCHED THEN INSERT (provider, sub_account_id, sub_account_name, sub_ac
 -- ---------------------------------------------------------------------
 MERGE dbo.dim_service AS t
 USING (
-  SELECT DISTINCT
+  SELECT
     provider_code AS provider,
-    COALESCE(NULLIF(ServiceName, ''), 'UNKNOWN') AS service_code,
-    COALESCE(NULLIF(ServiceName, ''), 'Unknown Service') AS service_name,
-    ServiceCategory AS service_category,
-    ServiceSubcategory AS service_subcategory
+    service_code_norm AS service_code,
+    service_code_norm AS service_name,
+    MAX(ServiceCategory) AS service_category,
+    MAX(ServiceSubcategory) AS service_subcategory
   FROM #stg_norm
+  GROUP BY provider_code, service_code_norm
 ) AS s
 ON t.provider = s.provider AND t.service_code = s.service_code
 WHEN MATCHED THEN UPDATE SET
@@ -108,9 +118,10 @@ WHEN NOT MATCHED THEN INSERT (provider, service_code, service_name, service_cate
 
 MERGE dbo.dim_region AS t
 USING (
-  SELECT DISTINCT provider_code AS provider, RegionId AS region_id, RegionName AS region_name
+  SELECT provider_code AS provider, region_id_norm AS region_id, MAX(RegionName) AS region_name
   FROM #stg_norm
-  WHERE RegionId IS NOT NULL
+  WHERE region_id_norm IS NOT NULL
+  GROUP BY provider_code, region_id_norm
 ) AS s
 ON t.provider = s.provider AND t.region_id = s.region_id
 WHEN MATCHED THEN UPDATE SET region_name = COALESCE(s.region_name, t.region_name)
@@ -141,15 +152,16 @@ WHEN NOT MATCHED THEN INSERT (provider, sku_id, sku_price_id, sku_meter, sku_pri
 
 MERGE dbo.dim_commitment_discount AS t
 USING (
-  SELECT DISTINCT
+  SELECT
     provider_code AS provider,
-    CommitmentDiscountId AS commitment_discount_id,
-    CommitmentDiscountName AS commitment_discount_name,
-    CommitmentDiscountType AS commitment_discount_type,
-    CommitmentDiscountCategory AS commitment_discount_category,
-    CommitmentDiscountUnit AS commitment_discount_unit
+    commitment_discount_id_norm AS commitment_discount_id,
+    MAX(CommitmentDiscountName) AS commitment_discount_name,
+    MAX(CommitmentDiscountType) AS commitment_discount_type,
+    MAX(CommitmentDiscountCategory) AS commitment_discount_category,
+    MAX(CommitmentDiscountUnit) AS commitment_discount_unit
   FROM #stg_norm
-  WHERE CommitmentDiscountId IS NOT NULL
+  WHERE commitment_discount_id_norm IS NOT NULL
+  GROUP BY provider_code, commitment_discount_id_norm
 ) AS s
 ON t.provider = s.provider AND t.commitment_discount_id = s.commitment_discount_id
 WHEN MATCHED THEN UPDATE SET
@@ -164,12 +176,13 @@ WHEN NOT MATCHED THEN INSERT (provider, commitment_discount_id, commitment_disco
 
 MERGE dbo.dim_capacity_reservation AS t
 USING (
-  SELECT DISTINCT
+  SELECT
     provider_code AS provider,
-    CapacityReservationId AS capacity_reservation_id,
-    CapacityReservationStatus AS capacity_reservation_status
+    capacity_reservation_id_norm AS capacity_reservation_id,
+    MAX(CapacityReservationStatus) AS capacity_reservation_status
   FROM #stg_norm
-  WHERE CapacityReservationId IS NOT NULL
+  WHERE capacity_reservation_id_norm IS NOT NULL
+  GROUP BY provider_code, capacity_reservation_id_norm
 ) AS s
 ON t.provider = s.provider AND t.capacity_reservation_id = s.capacity_reservation_id
 WHEN MATCHED THEN UPDATE SET capacity_reservation_status = COALESCE(s.capacity_reservation_status, t.capacity_reservation_status)
@@ -180,28 +193,29 @@ WHEN NOT MATCHED THEN INSERT (provider, capacity_reservation_id, capacity_reserv
 -- 4. Upsert resources (SCD2-lite: insert new version when tags/name change)
 -- ---------------------------------------------------------------------
 ;WITH src AS (
-  SELECT DISTINCT
+  SELECT
     n.provider_code AS provider,
-    n.ResourceId AS global_resource_id,
-    COALESCE(NULLIF(n.ResourceType, ''), 'UNKNOWN') AS resource_type,
-    a.account_sk,
-    sa.sub_account_sk,
-    svc.service_sk,
-    n.RegionId AS region,
-    n.ResourceName AS name,
-    JSON_VALUE(n.raw_tags_json, '$.application') AS application,
-    JSON_VALUE(n.raw_tags_json, '$.environment') AS environment,
-    JSON_VALUE(n.raw_tags_json, '$.business_unit') AS business,
-    JSON_VALUE(n.raw_tags_json, '$.CostCenter') AS cost_center,
-    JSON_VALUE(n.raw_tags_json, '$."info:support-team-email"') AS owner_email,
-    n.raw_tags_json AS tags_json,
-    n.charge_date AS valid_from
+    n.resource_id_norm AS global_resource_id,
+    COALESCE(NULLIF(MAX(NULLIF(LTRIM(RTRIM(n.ResourceType)), '')), ''), 'UNKNOWN') AS resource_type,
+    MAX(a.account_sk) AS account_sk,
+    MAX(sa.sub_account_sk) AS sub_account_sk,
+    MAX(svc.service_sk) AS service_sk,
+    MAX(n.region_id_norm) AS region,
+    MAX(n.ResourceName) AS name,
+    MAX(JSON_VALUE(n.raw_tags_json, '$.application')) AS application,
+    MAX(JSON_VALUE(n.raw_tags_json, '$.environment')) AS environment,
+    MAX(JSON_VALUE(n.raw_tags_json, '$.business_unit')) AS business,
+    MAX(JSON_VALUE(n.raw_tags_json, '$.CostCenter')) AS cost_center,
+    MAX(JSON_VALUE(n.raw_tags_json, '$."info:support-team-email"')) AS owner_email,
+    MAX(n.raw_tags_json) AS tags_json,
+    MIN(n.charge_date) AS valid_from
   FROM #stg_norm n
   INNER JOIN dbo.dim_account a ON a.provider = n.provider_code AND a.account_id = n.BillingAccountId
-  LEFT JOIN dbo.dim_sub_account sa ON sa.provider = n.provider_code AND sa.sub_account_id = n.SubAccountId
+  LEFT JOIN dbo.dim_sub_account sa ON sa.provider = n.provider_code AND sa.sub_account_id = n.sub_account_id_norm
   INNER JOIN dbo.dim_service svc ON svc.provider = n.provider_code
-    AND svc.service_code = COALESCE(NULLIF(n.ServiceName, ''), 'UNKNOWN')
-  WHERE n.ResourceId IS NOT NULL
+    AND svc.service_code = n.service_code_norm
+  WHERE n.resource_id_norm IS NOT NULL
+  GROUP BY n.provider_code, n.resource_id_norm
 )
 INSERT INTO dbo.dim_resource (
   provider, global_resource_id, resource_type, account_sk, sub_account_sk, service_sk,
@@ -255,21 +269,21 @@ INTO #daily_rollup
 FROM #stg_norm n
 INNER JOIN dbo.dim_account a ON a.provider = n.provider_code AND a.account_id = n.BillingAccountId
 INNER JOIN dbo.dim_service svc ON svc.provider = n.provider_code
-  AND svc.service_code = COALESCE(NULLIF(n.ServiceName, ''), 'UNKNOWN')
+  AND svc.service_code = n.service_code_norm
 INNER JOIN dbo.dim_charge_category cc ON cc.charge_category = n.charge_category_norm
-LEFT JOIN dbo.dim_sub_account sa ON sa.provider = n.provider_code AND sa.sub_account_id = n.SubAccountId
+LEFT JOIN dbo.dim_sub_account sa ON sa.provider = n.provider_code AND sa.sub_account_id = n.sub_account_id_norm
 LEFT JOIN dbo.dim_resource res ON res.provider = n.provider_code
-  AND res.global_resource_id = n.ResourceId AND res.valid_to IS NULL
+  AND res.global_resource_id = n.resource_id_norm AND res.valid_to IS NULL
 LEFT JOIN dbo.dim_sku sku ON sku.provider = n.provider_code
   AND sku.sku_id = n.sku_id_norm
   AND ISNULL(NULLIF(LTRIM(RTRIM(sku.sku_price_id)), ''), '~') = ISNULL(n.sku_price_id_norm, '~')
-LEFT JOIN dbo.dim_region reg ON reg.provider = n.provider_code AND reg.region_id = n.RegionId
-LEFT JOIN dbo.dim_charge_frequency cf ON cf.charge_frequency = n.ChargeFrequency
+LEFT JOIN dbo.dim_region reg ON reg.provider = n.provider_code AND reg.region_id = n.region_id_norm
+LEFT JOIN dbo.dim_charge_frequency cf ON cf.charge_frequency = n.charge_frequency_norm
 LEFT JOIN dbo.dim_pricing_category pc ON pc.pricing_category = n.pricing_category_norm
 LEFT JOIN dbo.dim_commitment_discount cmt ON cmt.provider = n.provider_code
-  AND cmt.commitment_discount_id = n.CommitmentDiscountId
+  AND cmt.commitment_discount_id = n.commitment_discount_id_norm
 LEFT JOIN dbo.dim_capacity_reservation cap ON cap.provider = n.provider_code
-  AND cap.capacity_reservation_id = n.CapacityReservationId
+  AND cap.capacity_reservation_id = n.capacity_reservation_id_norm
 GROUP BY
   n.charge_date, a.account_sk, sa.sub_account_sk, res.resource_sk, svc.service_sk,
   sku.sku_sk, reg.region_sk, cc.charge_category_sk, cf.charge_frequency_sk,
