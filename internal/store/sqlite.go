@@ -105,6 +105,10 @@ func (s *sqliteStore) ProcessBatch(ctx context.Context, batchID int64, focusVers
 	return p.ProcessBatch(ctx, batchID, focusVersion)
 }
 
+func (s *sqliteStore) GetBatchInfo(ctx context.Context, batchID int64) (BatchInfo, error) {
+	return GetBatchInfo(ctx, s.db, "sqlite", batchID)
+}
+
 func (s *sqliteStore) Validate(ctx context.Context, batchID int64) (ValidationReport, error) {
 	return validateBatch(ctx, s.db, batchID)
 }

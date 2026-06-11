@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -27,8 +29,9 @@ var (
 	skipAggregates bool
 	useGoETL       bool
 	forceImport    bool
-	rebuildTags    bool
-	rebuildAggs    bool
+	rebuildTags        bool
+	rebuildAggs        bool
+	processETLBatchIDs []int64
 )
 
 func main() {
@@ -51,6 +54,7 @@ func main() {
 
 	root.AddCommand(schemaCmd())
 	root.AddCommand(importCmd())
+	root.AddCommand(processETLCmd())
 	root.AddCommand(rebuildCmd())
 	root.AddCommand(validateCmd())
 
@@ -174,6 +178,64 @@ func importCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func processETLCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "process-etl",
+		Short: "Run ETL on existing staged batches without reloading parquet files",
+		Long: `Re-run dimension and fact ETL for batches that already have rows in stg_focus_cost_line.
+Use after a FAILED import when staging completed but ETL did not. Pass --batch-id for each batch to process.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(processETLBatchIDs) == 0 {
+				return fmt.Errorf("at least one --batch-id is required")
+			}
+			s, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer s.Close()
+
+			ctx := cmd.Context()
+			if ctx == nil {
+				ctx = context.Background()
+			}
+
+			ids := append([]int64(nil), processETLBatchIDs...)
+			sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+
+			for _, id := range ids {
+				info, err := s.GetBatchInfo(ctx, id)
+				if err == sql.ErrNoRows {
+					return fmt.Errorf("batch %d: not found", id)
+				}
+				if err != nil {
+					return err
+				}
+				if info.StagingRows == 0 {
+					return fmt.Errorf("batch %d (%s): no staging rows", id, info.SourceFile)
+				}
+				fmt.Printf("Processing ETL for batch %d (%s, status=%s, %d staging rows)\n",
+					id, info.SourceFile, info.Status, info.StagingRows)
+
+				t0 := time.Now()
+				if err := s.ProcessBatch(ctx, id, info.FocusVersion); err != nil {
+					_ = s.MarkBatchFailed(ctx, id)
+					return fmt.Errorf("etl batch %d: %w", id, err)
+				}
+				fmt.Printf("  ETL complete for batch %d in %s\n", id, time.Since(t0).Round(time.Millisecond))
+
+				rep, err := s.Validate(ctx, id)
+				if err != nil {
+					return err
+				}
+				store.PrintValidation(rep)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().Int64SliceVar(&processETLBatchIDs, "batch-id", nil, "Ingestion batch id to process (repeatable)")
+	return cmd
 }
 
 func rebuildCmd() *cobra.Command {

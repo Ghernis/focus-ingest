@@ -88,10 +88,42 @@ func loadingBatchIDs(ctx context.Context, db *sql.DB, dialect, sourceFile, focus
 func MarkBatchFailed(ctx context.Context, db *sql.DB, dialect string, batchID int64) error {
 	var q string
 	if dialect == "sqlserver" {
-		q = `UPDATE dim_ingestion_batch SET status = 'FAILED' WHERE ingestion_batch_id = @p1 AND status = 'LOADING'`
+		q = `UPDATE dim_ingestion_batch SET status = 'FAILED' WHERE ingestion_batch_id = @p1 AND status IN ('LOADING', 'FAILED')`
 	} else {
-		q = `UPDATE dim_ingestion_batch SET status = 'FAILED' WHERE ingestion_batch_id = ? AND status = 'LOADING'`
+		q = `UPDATE dim_ingestion_batch SET status = 'FAILED' WHERE ingestion_batch_id = ? AND status IN ('LOADING', 'FAILED')`
 	}
 	_, err := db.ExecContext(ctx, q, batchID)
 	return err
+}
+
+// GetBatchInfo returns batch metadata and staging row count for an ingestion batch.
+func GetBatchInfo(ctx context.Context, db *sql.DB, dialect string, batchID int64) (BatchInfo, error) {
+	var info BatchInfo
+	info.ID = batchID
+	var err error
+	if dialect == "sqlserver" {
+		err = db.QueryRowContext(ctx, `
+			SELECT focus_version, source_file, status
+			FROM dim_ingestion_batch
+			WHERE ingestion_batch_id = @p1`, batchID).Scan(&info.FocusVersion, &info.SourceFile, &info.Status)
+		if err != nil {
+			return info, err
+		}
+		err = db.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM stg_focus_cost_line WHERE ingestion_batch_id = @p1`, batchID).Scan(&info.StagingRows)
+	} else {
+		err = db.QueryRowContext(ctx, `
+			SELECT focus_version, source_file, status
+			FROM dim_ingestion_batch
+			WHERE ingestion_batch_id = ?`, batchID).Scan(&info.FocusVersion, &info.SourceFile, &info.Status)
+		if err != nil {
+			return info, err
+		}
+		err = db.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM stg_focus_cost_line WHERE ingestion_batch_id = ?`, batchID).Scan(&info.StagingRows)
+	}
+	if err != nil {
+		return info, err
+	}
+	return info, nil
 }

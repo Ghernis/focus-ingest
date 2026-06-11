@@ -31,7 +31,8 @@ SELECT
        WHEN LOWER(s.PricingCategory) = 'dynamic' THEN 'Dynamic'
        ELSE 'Other'
   END AS pricing_category_norm,
-  CONVERT(CHAR(64), HASHBYTES('SHA2_256', COALESCE(s.ChargeDescription, N'')), 2) AS charge_description_hash
+  CONVERT(CHAR(64), HASHBYTES('SHA2_256', COALESCE(s.ChargeDescription, N'')), 2) AS charge_description_hash,
+  NULLIF(LTRIM(RTRIM(s.SkuPriceId)), '') AS sku_price_id_norm
 INTO #stg_norm
 FROM dbo.stg_focus_cost_line s
 WHERE s.ingestion_batch_id = @IngestionBatchId
@@ -120,7 +121,7 @@ USING (
   SELECT DISTINCT
     provider_code AS provider,
     SkuId AS sku_id,
-    SkuPriceId AS sku_price_id,
+    sku_price_id_norm AS sku_price_id,
     SkuMeter AS sku_meter,
     SkuPriceDetails AS sku_price_details,
     ServiceName AS service_name
@@ -128,7 +129,7 @@ USING (
   WHERE SkuId IS NOT NULL
 ) AS s
 ON t.provider = s.provider AND t.sku_id = s.sku_id
-   AND ISNULL(t.sku_price_id, '') = ISNULL(s.sku_price_id, '')
+   AND (t.sku_price_id = s.sku_price_id OR (t.sku_price_id IS NULL AND s.sku_price_id IS NULL))
 WHEN MATCHED THEN UPDATE SET
   sku_meter = COALESCE(s.sku_meter, t.sku_meter),
   sku_price_details = COALESCE(s.sku_price_details, t.sku_price_details),
@@ -258,7 +259,8 @@ LEFT JOIN dbo.dim_sub_account sa ON sa.provider = n.provider_code AND sa.sub_acc
 LEFT JOIN dbo.dim_resource res ON res.provider = n.provider_code
   AND res.global_resource_id = n.ResourceId AND res.valid_to IS NULL
 LEFT JOIN dbo.dim_sku sku ON sku.provider = n.provider_code
-  AND sku.sku_id = n.SkuId AND ISNULL(sku.sku_price_id, '') = ISNULL(n.SkuPriceId, '')
+  AND sku.sku_id = n.SkuId
+  AND (sku.sku_price_id = n.sku_price_id_norm OR (sku.sku_price_id IS NULL AND n.sku_price_id_norm IS NULL))
 LEFT JOIN dbo.dim_region reg ON reg.provider = n.provider_code AND reg.region_id = n.RegionId
 LEFT JOIN dbo.dim_charge_frequency cf ON cf.charge_frequency = n.ChargeFrequency
 LEFT JOIN dbo.dim_pricing_category pc ON pc.pricing_category = n.pricing_category_norm

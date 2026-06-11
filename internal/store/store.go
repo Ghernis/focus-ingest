@@ -12,6 +12,15 @@ type BatchMeta struct {
 	SourceFile     string
 }
 
+// BatchInfo describes an ingestion batch and its staging row count.
+type BatchInfo struct {
+	ID           int64
+	FocusVersion string
+	SourceFile   string
+	Status       string
+	StagingRows  int64
+}
+
 type ProviderSpend struct {
 	Provider         string
 	TotalEffective   string
@@ -36,6 +45,7 @@ type Store interface {
 	BeginBatch(ctx context.Context, meta BatchMeta) (int64, error)
 	InsertStaging(ctx context.Context, batchID int64, focusVersion, sourceFile string, rows []focus.StagingRow) error
 	ProcessBatch(ctx context.Context, batchID int64, focusVersion string) error
+	GetBatchInfo(ctx context.Context, batchID int64) (BatchInfo, error)
 	Validate(ctx context.Context, batchID int64) (ValidationReport, error)
 	FindCompletedImport(ctx context.Context, sourceFile, focusVersion string) (batchID int64, found bool, err error)
 	PurgeImport(ctx context.Context, batchID int64) error

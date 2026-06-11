@@ -125,6 +125,10 @@ func (s *sqlserverStore) ProcessBatch(ctx context.Context, batchID int64, focusV
 	return p.ProcessBatch(ctx, batchID, focusVersion)
 }
 
+func (s *sqlserverStore) GetBatchInfo(ctx context.Context, batchID int64) (BatchInfo, error) {
+	return GetBatchInfo(ctx, s.db, "sqlserver", batchID)
+}
+
 func (s *sqlserverStore) Validate(ctx context.Context, batchID int64) (ValidationReport, error) {
 	return validateBatch(ctx, s.db, batchID)
 }
