@@ -32,6 +32,7 @@ SELECT
        ELSE 'Other'
   END AS pricing_category_norm,
   CONVERT(CHAR(64), HASHBYTES('SHA2_256', COALESCE(s.ChargeDescription, N'')), 2) AS charge_description_hash,
+  NULLIF(LTRIM(RTRIM(s.SkuId)), '') AS sku_id_norm,
   NULLIF(LTRIM(RTRIM(s.SkuPriceId)), '') AS sku_price_id_norm
 INTO #stg_norm
 FROM dbo.stg_focus_cost_line s
@@ -118,18 +119,19 @@ WHEN NOT MATCHED THEN INSERT (provider, region_id, region_name)
 
 MERGE dbo.dim_sku AS t
 USING (
-  SELECT DISTINCT
+  SELECT
     provider_code AS provider,
-    SkuId AS sku_id,
+    sku_id_norm AS sku_id,
     sku_price_id_norm AS sku_price_id,
-    SkuMeter AS sku_meter,
-    SkuPriceDetails AS sku_price_details,
-    ServiceName AS service_name
+    MAX(SkuMeter) AS sku_meter,
+    MAX(SkuPriceDetails) AS sku_price_details,
+    MAX(ServiceName) AS service_name
   FROM #stg_norm
-  WHERE SkuId IS NOT NULL
+  WHERE sku_id_norm IS NOT NULL
+  GROUP BY provider_code, sku_id_norm, sku_price_id_norm
 ) AS s
 ON t.provider = s.provider AND t.sku_id = s.sku_id
-   AND (t.sku_price_id = s.sku_price_id OR (t.sku_price_id IS NULL AND s.sku_price_id IS NULL))
+   AND ISNULL(NULLIF(LTRIM(RTRIM(t.sku_price_id)), ''), '~') = ISNULL(s.sku_price_id, '~')
 WHEN MATCHED THEN UPDATE SET
   sku_meter = COALESCE(s.sku_meter, t.sku_meter),
   sku_price_details = COALESCE(s.sku_price_details, t.sku_price_details),
@@ -259,8 +261,8 @@ LEFT JOIN dbo.dim_sub_account sa ON sa.provider = n.provider_code AND sa.sub_acc
 LEFT JOIN dbo.dim_resource res ON res.provider = n.provider_code
   AND res.global_resource_id = n.ResourceId AND res.valid_to IS NULL
 LEFT JOIN dbo.dim_sku sku ON sku.provider = n.provider_code
-  AND sku.sku_id = n.SkuId
-  AND (sku.sku_price_id = n.sku_price_id_norm OR (sku.sku_price_id IS NULL AND n.sku_price_id_norm IS NULL))
+  AND sku.sku_id = n.sku_id_norm
+  AND ISNULL(NULLIF(LTRIM(RTRIM(sku.sku_price_id)), ''), '~') = ISNULL(n.sku_price_id_norm, '~')
 LEFT JOIN dbo.dim_region reg ON reg.provider = n.provider_code AND reg.region_id = n.RegionId
 LEFT JOIN dbo.dim_charge_frequency cf ON cf.charge_frequency = n.ChargeFrequency
 LEFT JOIN dbo.dim_pricing_category pc ON pc.pricing_category = n.pricing_category_norm
