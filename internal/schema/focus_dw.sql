@@ -304,7 +304,8 @@ BEGIN
     billing_period_end   DATE       NULL,
     row_count          BIGINT       NULL,
     loaded_utc         DATETIME2    NOT NULL DEFAULT SYSUTCDATETIME(),
-    status             VARCHAR(32)  NOT NULL DEFAULT 'LOADED'
+    status             VARCHAR(32)  NOT NULL DEFAULT 'LOADED',
+    aggregates_status  VARCHAR(32)  NULL
   );
 END
 GO
@@ -1246,6 +1247,20 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_ingestion_batch_sourc
 BEGIN
   CREATE INDEX IX_ingestion_batch_source
     ON dbo.dim_ingestion_batch (source_file, focus_version, status);
+END
+GO
+
+IF COL_LENGTH('dbo.dim_ingestion_batch', 'aggregates_status') IS NULL
+BEGIN
+  ALTER TABLE dbo.dim_ingestion_batch ADD aggregates_status VARCHAR(32) NULL;
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_ingestion_batch_agg_status' AND object_id = OBJECT_ID(N'dbo.dim_ingestion_batch'))
+BEGIN
+  CREATE INDEX IX_ingestion_batch_agg_status
+    ON dbo.dim_ingestion_batch (status, aggregates_status)
+    INCLUDE (ingestion_batch_id);
 END
 GO
 

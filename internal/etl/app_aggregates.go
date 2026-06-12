@@ -147,15 +147,28 @@ func (p *Processor) rebuildAppAggregates(ctx context.Context, tx *sql.Tx) error 
 	return p.rebuildCostAnomalies(ctx, tx)
 }
 
+func (p *Processor) rebuildCostDistributionForMonth(ctx context.Context, tx *sql.Tx, month string) error {
+	return p.rebuildCostDistributionFiltered(ctx, tx, monthEq("month_start", month))
+}
+
 func (p *Processor) rebuildCostDistribution(ctx context.Context, tx *sql.Tx) error {
+	return p.rebuildCostDistributionFiltered(ctx, tx, "")
+}
+
+func (p *Processor) rebuildCostDistributionFiltered(ctx context.Context, tx *sql.Tx, monthWhere string) error {
 	// Built only from agg_app_* tables (not raw facts/staging).
 	groups := map[distKey][]float64{}
 	costCol := p.castCost("billed_cost")
 
+	appWhere := ""
+	if monthWhere != "" {
+		appWhere = "WHERE " + monthWhere
+	}
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
 		SELECT month_start, provider, application_sk, SUM(%s)
 		FROM agg_app_monthly
-		GROUP BY month_start, provider, application_sk`, costCol))
+		%s
+		GROUP BY month_start, provider, application_sk`, costCol, appWhere))
 	if err != nil {
 		return err
 	}
@@ -175,7 +188,8 @@ func (p *Processor) rebuildCostDistribution(ctx context.Context, tx *sql.Tx) err
 	rows, err = tx.QueryContext(ctx, fmt.Sprintf(`
 		SELECT month_start, provider, application_sk, service_sk, SUM(%s)
 		FROM agg_app_service_monthly
-		GROUP BY month_start, provider, application_sk, service_sk`, costCol))
+		%s
+		GROUP BY month_start, provider, application_sk, service_sk`, costCol, appWhere))
 	if err != nil {
 		return err
 	}
@@ -195,7 +209,8 @@ func (p *Processor) rebuildCostDistribution(ctx context.Context, tx *sql.Tx) err
 	rows, err = tx.QueryContext(ctx, fmt.Sprintf(`
 		SELECT month_start, provider, application_sk, service_sk, resource_sk, SUM(%s)
 		FROM agg_app_service_resource_monthly
-		GROUP BY month_start, provider, application_sk, service_sk, resource_sk`, costCol))
+		%s
+		GROUP BY month_start, provider, application_sk, service_sk, resource_sk`, costCol, appWhere))
 	if err != nil {
 		return err
 	}

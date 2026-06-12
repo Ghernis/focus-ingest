@@ -129,8 +129,8 @@ func (s *sqliteStore) PurgeStaleLoading(ctx context.Context, sourceFile, focusVe
 	return PurgeLoadingBatchesForFile(ctx, s.db, "sqlite", sourceFile, focusVersion)
 }
 
-func (s *sqliteStore) RebuildAggregates(ctx context.Context) error {
-	return (&etl.Processor{DB: s.db, Dialect: "sqlite"}).RebuildAggregates(ctx)
+func (s *sqliteStore) RebuildAggregates(ctx context.Context, full bool) (int, error) {
+	return (&etl.Processor{DB: s.db, Dialect: "sqlite"}).RebuildAggregates(ctx, full)
 }
 
 func (s *sqliteStore) RebuildTags(ctx context.Context) error {

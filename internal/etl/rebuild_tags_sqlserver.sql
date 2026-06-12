@@ -1,4 +1,7 @@
--- Tag bridge (requires #stg_norm from process_batch_sqlserver_core.sql in the same SQL batch)
+-- Set-based tag bridge rebuild for all PROCESSED batches (no Go staging load).
+
+DELETE FROM dbo.bridge_cost_tag;
+
 IF OBJECT_ID('tempdb..#tag_pairs') IS NOT NULL DROP TABLE #tag_pairs;
 
 SELECT DISTINCT
@@ -7,14 +10,22 @@ SELECT DISTINCT
   LEFT(j.[value], 512) AS tag_value
 INTO #tag_pairs
 FROM dbo.fact_focus_cost_daily f
-INNER JOIN #stg_norm n
-  ON n.charge_date = f.charge_date
- AND n.charge_description_hash = f.charge_description_hash
+INNER JOIN dbo.dim_ingestion_batch b
+  ON b.ingestion_batch_id = f.ingestion_batch_id AND b.status = 'PROCESSED'
+INNER JOIN dbo.stg_focus_cost_line n
+  ON n.ingestion_batch_id = f.ingestion_batch_id
+ AND CAST(n.ChargePeriodStart AS DATE) = f.charge_date
+ AND CONVERT(CHAR(64), HASHBYTES('SHA2_256', COALESCE(n.ChargeDescription, N'')), 2) = f.charge_description_hash
 INNER JOIN dbo.dim_account a ON a.account_sk = f.billing_account_sk
-  AND a.account_id = n.BillingAccountId AND a.provider = n.provider_code
+  AND a.account_id = n.BillingAccountId
+  AND a.provider = CASE
+    WHEN COALESCE(n.Provider, n.source_provider) IN ('AWS', 'Amazon Web Services') THEN 'AWS'
+    WHEN COALESCE(n.Provider, n.source_provider) IN ('Microsoft', 'Azure') THEN 'AZURE'
+    WHEN COALESCE(n.Provider, n.source_provider) IN ('Google Cloud', 'GCP', 'Google') THEN 'GCP'
+    ELSE COALESCE(n.Provider, n.source_provider)
+  END
 CROSS APPLY OPENJSON(n.raw_tags_json) j
-WHERE f.ingestion_batch_id = @IngestionBatchId
-  AND n.raw_tags_json IS NOT NULL
+WHERE n.raw_tags_json IS NOT NULL
   AND ISJSON(n.raw_tags_json) = 1
   AND j.[type] = 1;
 

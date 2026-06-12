@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-func (p *Processor) rebuildAggregates(ctx context.Context, tx *sql.Tx) error {
+func (p *Processor) rebuildAggregates(ctx context.Context, tx *sql.Tx, _ []string) error {
 	tables := []string{
 		"agg_cost_daily", "agg_cost_monthly", "agg_cost_by_tag",
 		"agg_commitment_utilization", "agg_commitment_utilization_daily", "agg_savings_summary",

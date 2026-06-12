@@ -27,26 +27,35 @@ func (p *Processor) processBatchSQLServer(ctx context.Context, batchID int64, fo
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(ctx, sqlBatchHeader+processBatchSQLServerCore, focusVersion, batchID); err != nil {
-		return fmt.Errorf("sql etl core: %w", err)
-	}
+	// Core and tags must run in one SQL batch so #stg_norm survives between steps
+	// (local temp tables are dropped when the batch ends).
+	script := sqlBatchHeader + processBatchSQLServerCore
 	if !p.SkipTags {
-		if _, err := tx.ExecContext(ctx, sqlBatchHeader+processBatchSQLServerTags, focusVersion, batchID); err != nil {
-			return fmt.Errorf("sql etl tags: %w", err)
+		script += processBatchSQLServerTags
+	}
+	if _, err := tx.ExecContext(ctx, script, focusVersion, batchID); err != nil {
+		if p.SkipTags {
+			return fmt.Errorf("sql etl core: %w", err)
 		}
+		return fmt.Errorf("sql etl: %w", err)
 	}
 	if !p.SkipAggregates {
-		if err := p.rebuildAggregates(ctx, tx); err != nil {
+		if err := p.rebuildAggregates(ctx, tx, nil); err != nil {
 			return err
 		}
+	}
+	aggStatus := AggregatesStatusComplete
+	if p.SkipAggregates {
+		aggStatus = AggregatesStatusPending
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE dbo.dim_ingestion_batch
 		SET row_count = (
 		  SELECT COUNT(*) FROM dbo.stg_focus_cost_line WHERE ingestion_batch_id = @p2
 		),
-		status = 'PROCESSED'
-		WHERE ingestion_batch_id = @p2`, focusVersion, batchID); err != nil {
+		status = 'PROCESSED',
+		aggregates_status = @p3
+		WHERE ingestion_batch_id = @p2`, focusVersion, batchID, aggStatus); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -79,7 +88,7 @@ func (p *Processor) processBatchGo(ctx context.Context, batchID int64, focusVers
 		}
 	}
 	if !p.SkipAggregates {
-		if err := p.rebuildAggregates(ctx, tx); err != nil {
+		if err := p.rebuildAggregates(ctx, tx, nil); err != nil {
 			return err
 		}
 	}

@@ -3,24 +3,36 @@ package etl
 import (
 	"context"
 	"database/sql"
+	_ "embed"
 	"fmt"
 )
 
-// RebuildAggregates recomputes all aggregate tables from fact_focus_cost_daily.
-func (p *Processor) RebuildAggregates(ctx context.Context) error {
-	tx, err := p.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return err
+//go:embed rebuild_tags_sqlserver.sql
+var rebuildTagsSQLServer string
+
+// RebuildAggregates refreshes aggregate tables. When full is false, only billing months
+// for batches with aggregates_status <> COMPLETE are rebuilt. Returns months rebuilt.
+func (p *Processor) RebuildAggregates(ctx context.Context, full bool) (int, error) {
+	if full {
+		return 0, p.RebuildAggregatesFull(ctx)
 	}
-	defer tx.Rollback()
-	if err := p.rebuildAggregates(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return p.RebuildAggregatesIncremental(ctx)
 }
 
 // RebuildTagsAll rebuilds bridge_cost_tag for every PROCESSED batch using staging tag JSON.
 func (p *Processor) RebuildTagsAll(ctx context.Context) error {
+	if p.Dialect == "sqlserver" {
+		tx, err := p.DB.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err := tx.ExecContext(ctx, rebuildTagsSQLServer); err != nil {
+			return fmt.Errorf("sql tag rebuild: %w", err)
+		}
+		return tx.Commit()
+	}
+
 	batchIDs, err := p.processedBatchIDs(ctx)
 	if err != nil {
 		return err

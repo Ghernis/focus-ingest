@@ -186,7 +186,28 @@ func (p *Processor) syncApplicationsFromRows(ctx context.Context, tx *sql.Tx, ro
 	return nil
 }
 
+func (p *Processor) syncApplicationsFromFactsForMonth(ctx context.Context, tx *sql.Tx, month string) error {
+	joins := p.appContextJoins()
+	q := fmt.Sprintf(`
+		SELECT %s AS raw_application, MIN(f.charge_date) AS first_seen_date
+		FROM fact_focus_cost_daily f
+		%s
+		WHERE %s
+		GROUP BY %s`, p.rawApplicationExpr(), joins, monthEq("f.billing_period_start", month), p.rawApplicationExpr())
+	return p.syncApplicationsFromQuery(ctx, tx, q)
+}
+
 func (p *Processor) syncApplicationsFromFacts(ctx context.Context, tx *sql.Tx) error {
+	joins := p.appContextJoins()
+	q := fmt.Sprintf(`
+		SELECT %s AS raw_application, MIN(f.charge_date) AS first_seen_date
+		FROM fact_focus_cost_daily f
+		%s
+		GROUP BY %s`, p.rawApplicationExpr(), joins, p.rawApplicationExpr())
+	return p.syncApplicationsFromQuery(ctx, tx, q)
+}
+
+func (p *Processor) syncApplicationsFromQuery(ctx context.Context, tx *sql.Tx, q string) error {
 	cache, err := p.loadApplicationAliasCache(ctx, tx)
 	if err != nil {
 		return err
@@ -194,13 +215,6 @@ func (p *Processor) syncApplicationsFromFacts(ctx context.Context, tx *sql.Tx) e
 	if err := p.ensureDefaultApplication(ctx, tx, cache); err != nil {
 		return err
 	}
-
-	joins := p.appContextJoins()
-	q := fmt.Sprintf(`
-		SELECT %s AS raw_application, MIN(f.charge_date) AS first_seen_date
-		FROM fact_focus_cost_daily f
-		%s
-		GROUP BY %s`, p.rawApplicationExpr(), joins, p.rawApplicationExpr())
 
 	rows, err := tx.QueryContext(ctx, q)
 	if err != nil {

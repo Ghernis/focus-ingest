@@ -113,7 +113,7 @@ func TestSQLiteRebuildAggregates_DistributionInsert(t *testing.T) {
 	if err := s.RebuildTags(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RebuildAggregates(ctx); err != nil {
+	if _, err := s.RebuildAggregates(ctx, true); err != nil {
 		t.Fatal(err)
 	}
 }

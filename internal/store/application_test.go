@@ -66,7 +66,7 @@ func TestApplicationNormalization_MergesAliases(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.RebuildAggregates(ctx); err != nil {
+	if _, err := s.RebuildAggregates(ctx, true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -138,7 +138,7 @@ func TestApplicationNormalization_PluralMerge(t *testing.T) {
 	if err := s.ProcessBatch(ctx, b2, "1.0"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RebuildAggregates(ctx); err != nil {
+	if _, err := s.RebuildAggregates(ctx, true); err != nil {
 		t.Fatal(err)
 	}
 

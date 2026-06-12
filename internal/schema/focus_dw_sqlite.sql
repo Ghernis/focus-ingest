@@ -200,7 +200,8 @@ CREATE TABLE IF NOT EXISTS dim_ingestion_batch (
   billing_period_end   TEXT NULL,
   row_count            INTEGER NULL,
   loaded_utc           TEXT NOT NULL DEFAULT (datetime('now')),
-  status               TEXT NOT NULL DEFAULT 'LOADED'
+  status               TEXT NOT NULL DEFAULT 'LOADED',
+  aggregates_status    TEXT NULL
 );
 
 CREATE TABLE IF NOT EXISTS stg_focus_cost_line (
@@ -673,6 +674,7 @@ CREATE TABLE IF NOT EXISTS agg_cost_anomaly_monthly (
 CREATE INDEX IF NOT EXISTS IX_agg_cost_anomaly_month ON agg_cost_anomaly_monthly (month_start, provider, anomaly_flag);
 
 CREATE INDEX IF NOT EXISTS IX_ingestion_batch_source ON dim_ingestion_batch (source_file, focus_version, status);
+CREATE INDEX IF NOT EXISTS IX_ingestion_batch_agg_status ON dim_ingestion_batch (status, aggregates_status);
 CREATE INDEX IF NOT EXISTS IX_fact_cost_daily_batch ON fact_focus_cost_daily (ingestion_batch_id);
 CREATE INDEX IF NOT EXISTS IX_fact_cost_daily_date_account ON fact_focus_cost_daily (charge_date, billing_account_sk);
 CREATE INDEX IF NOT EXISTS IX_fact_cost_daily_billing_period ON fact_focus_cost_daily (billing_period_start, billing_account_sk);

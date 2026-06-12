@@ -51,7 +51,7 @@ type Store interface {
 	PurgeImport(ctx context.Context, batchID int64) error
 	MarkBatchFailed(ctx context.Context, batchID int64) error
 	PurgeStaleLoading(ctx context.Context, sourceFile, focusVersion string) (int, error)
-	RebuildAggregates(ctx context.Context) error
+	RebuildAggregates(ctx context.Context, full bool) (monthsRebuilt int, err error)
 	RebuildTags(ctx context.Context) error
 	Close() error
 	Dialect() string

@@ -31,6 +31,7 @@ var (
 	forceImport    bool
 	rebuildTags        bool
 	rebuildAggs        bool
+	rebuildAggFull     bool
 	processETLBatchIDs []int64
 )
 
@@ -247,6 +248,7 @@ func rebuildCmd() *cobra.Command {
 	rebuildAggs = true
 	cmd.PersistentFlags().BoolVar(&rebuildTags, "tags", true, "Rebuild tag bridges from staging")
 	cmd.PersistentFlags().BoolVar(&rebuildAggs, "aggregates", true, "Rebuild aggregate tables from daily facts")
+	cmd.PersistentFlags().BoolVar(&rebuildAggFull, "full", false, "Rebuild all aggregate months (default: only batches not yet aggregated)")
 
 	run := func(label string, fn func() error) error {
 		t0 := time.Now()
@@ -277,7 +279,20 @@ func rebuildCmd() *cobra.Command {
 			}
 		}
 		if rebuildAggs {
-			if err := run("Aggregate rebuild", func() error { return s.RebuildAggregates(ctx) }); err != nil {
+			if err := run("Aggregate rebuild", func() error {
+				n, err := s.RebuildAggregates(ctx, rebuildAggFull)
+				if err != nil {
+					return err
+				}
+				if rebuildAggFull {
+					fmt.Println("  full aggregate refresh (all months)")
+				} else if n == 0 {
+					fmt.Println("  no pending batches — aggregates already up to date")
+				} else {
+					fmt.Printf("  rebuilt aggregates for %d billing month(s)\n", n)
+				}
+				return nil
+			}); err != nil {
 				return err
 			}
 		}

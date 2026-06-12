@@ -144,20 +144,34 @@ func stdDevPopulation(values []float64, mean float64) float64 {
 	return math.Sqrt(sumSq / float64(len(values)))
 }
 
-func (p *Processor) rebuildCostAnomalies(ctx context.Context, tx *sql.Tx) error {
-	if err := p.rebuildAppAnomalies(ctx, tx); err != nil {
+func (p *Processor) rebuildCostAnomaliesForMonth(ctx context.Context, tx *sql.Tx, month string) error {
+	if err := p.rebuildAppAnomalies(ctx, tx, month); err != nil {
 		return err
 	}
-	return p.rebuildServiceAnomalies(ctx, tx)
+	return p.rebuildServiceAnomalies(ctx, tx, month)
 }
 
-func (p *Processor) rebuildAppAnomalies(ctx context.Context, tx *sql.Tx) error {
+func (p *Processor) rebuildCostAnomalies(ctx context.Context, tx *sql.Tx) error {
+	if err := p.rebuildAppAnomalies(ctx, tx, ""); err != nil {
+		return err
+	}
+	return p.rebuildServiceAnomalies(ctx, tx, "")
+}
+
+func (p *Processor) rebuildAppAnomalies(ctx context.Context, tx *sql.Tx, onlyMonth string) error {
 	costCol := p.castCost("billed_cost")
+	scope := ""
+	if onlyMonth != "" {
+		scope = fmt.Sprintf(`WHERE application_sk IN (
+			SELECT DISTINCT application_sk FROM agg_app_monthly WHERE %s
+		)`, monthEq("month_start", onlyMonth))
+	}
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
 		SELECT month_start, provider, application_sk, SUM(%s)
 		FROM agg_app_monthly
+		%s
 		GROUP BY month_start, provider, application_sk
-		ORDER BY provider, application_sk, month_start`, costCol))
+		ORDER BY provider, application_sk, month_start`, costCol, scope))
 	if err != nil {
 		return fmt.Errorf("load app monthly: %w", err)
 	}
@@ -184,6 +198,9 @@ func (p *Processor) rebuildAppAnomalies(ctx context.Context, tx *sql.Tx) error {
 
 	for k, pts := range series {
 		for _, m := range computeMonthlyAnomalies(pts) {
+			if onlyMonth != "" && m.month != onlyMonth {
+				continue
+			}
 			if err := p.insertAnomalyRow(ctx, tx, m, k.provider, "APP", k.appSK, 0); err != nil {
 				return err
 			}
@@ -192,13 +209,20 @@ func (p *Processor) rebuildAppAnomalies(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-func (p *Processor) rebuildServiceAnomalies(ctx context.Context, tx *sql.Tx) error {
+func (p *Processor) rebuildServiceAnomalies(ctx context.Context, tx *sql.Tx, onlyMonth string) error {
 	costCol := p.castCost("billed_cost")
+	scope := ""
+	if onlyMonth != "" {
+		scope = fmt.Sprintf(`WHERE application_sk IN (
+			SELECT DISTINCT application_sk FROM agg_app_service_monthly WHERE %s
+		)`, monthEq("month_start", onlyMonth))
+	}
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
 		SELECT month_start, provider, application_sk, service_sk, SUM(%s)
 		FROM agg_app_service_monthly
+		%s
 		GROUP BY month_start, provider, application_sk, service_sk
-		ORDER BY provider, application_sk, service_sk, month_start`, costCol))
+		ORDER BY provider, application_sk, service_sk, month_start`, costCol, scope))
 	if err != nil {
 		return fmt.Errorf("load app service monthly: %w", err)
 	}
@@ -226,6 +250,9 @@ func (p *Processor) rebuildServiceAnomalies(ctx context.Context, tx *sql.Tx) err
 
 	for k, pts := range series {
 		for _, m := range computeMonthlyAnomalies(pts) {
+			if onlyMonth != "" && m.month != onlyMonth {
+				continue
+			}
 			if err := p.insertAnomalyRow(ctx, tx, m, k.provider, "SERVICE", k.appSK, k.svcSK); err != nil {
 				return err
 			}

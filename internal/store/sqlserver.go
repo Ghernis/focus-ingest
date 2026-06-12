@@ -149,8 +149,8 @@ func (s *sqlserverStore) PurgeStaleLoading(ctx context.Context, sourceFile, focu
 	return PurgeLoadingBatchesForFile(ctx, s.db, "sqlserver", sourceFile, focusVersion)
 }
 
-func (s *sqlserverStore) RebuildAggregates(ctx context.Context) error {
-	return (&etl.Processor{DB: s.db, Dialect: "sqlserver"}).RebuildAggregates(ctx)
+func (s *sqlserverStore) RebuildAggregates(ctx context.Context, full bool) (int, error) {
+	return (&etl.Processor{DB: s.db, Dialect: "sqlserver"}).RebuildAggregates(ctx, full)
 }
 
 func (s *sqlserverStore) RebuildTags(ctx context.Context) error {

@@ -307,8 +307,12 @@ func (p *Processor) q(sqlite string) string {
 }
 
 func (p *Processor) updateBatchStatus(ctx context.Context, tx *sql.Tx, batchID, rowCount int64) error {
+	aggStatus := AggregatesStatusComplete
+	if p.SkipAggregates {
+		aggStatus = AggregatesStatusPending
+	}
 	_, err := tx.ExecContext(ctx, p.q(`
-		UPDATE dim_ingestion_batch SET row_count = ?, status = 'PROCESSED' WHERE ingestion_batch_id = ?`),
-		rowCount, batchID)
+		UPDATE dim_ingestion_batch SET row_count = ?, status = 'PROCESSED', aggregates_status = ? WHERE ingestion_batch_id = ?`),
+		rowCount, aggStatus, batchID)
 	return err
 }
