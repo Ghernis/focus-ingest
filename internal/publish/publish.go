@@ -49,7 +49,7 @@ func Publish(ctx context.Context, opts Options) error {
 		return err
 	}
 	if !seeded {
-		return fmt.Errorf("local database has no seeded dimensions — run sync-dims first")
+		return fmt.Errorf("local database is not seeded — run sync-dims --connection <azure> --sqlite-path <db> --fresh (or schema apply --local) before publish")
 	}
 
 	fmt.Println("Publishing pending dimensions to SQL Server...")
@@ -114,8 +114,8 @@ func AutoSyncDimsIfEmpty(ctx context.Context, connection, sqlitePath string) err
 		return nil
 	}
 	if connection == "" {
-		return fmt.Errorf("local import requires seeded dimensions: pass --connection for auto sync-dims, or run sync-dims first")
+		return fmt.Errorf("local database not seeded: run sync-dims --connection <azure> --sqlite-path <db> --fresh first, or pass --connection (or FOCUS_DATABASE_URL) to auto sync-dims on import")
 	}
-	fmt.Println("Local dimensions empty — running sync-dims from SQL Server...")
+	fmt.Println("Local database not seeded — running sync-dims from SQL Server...")
 	return SyncDims(ctx, SyncDimsOptions{Connection: connection, SQLitePath: sqlitePath, Fresh: true})
 }

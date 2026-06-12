@@ -378,14 +378,26 @@ func recordSeededMax(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-// DimsSeeded reports whether local SQLite has dimension rows (from sync-dims).
+// DimsSeeded reports whether local SQLite is ready for hybrid import.
+// True after sync-dims (even when the server has zero entity dims), or after schema apply with lookup seeds.
 func DimsSeeded(ctx context.Context, sqlitePath string) (bool, error) {
 	local, err := openSQLite(ctx, sqlitePath)
 	if err != nil {
 		return false, err
 	}
 	defer local.Close()
+
 	var n int
+	// sync-dims always populates this table (max_sk may be 0 per dim on first-ever deploy).
+	if err := local.QueryRowContext(ctx, `SELECT COUNT(*) FROM dim_sync_seeded_max`).Scan(&n); err == nil && n > 0 {
+		return true, nil
+	}
+
+	// Local schema apply seeds charge_category / dim_date without sync-dims.
+	if err := local.QueryRowContext(ctx, `SELECT COUNT(*) FROM dim_charge_category`).Scan(&n); err == nil && n > 0 {
+		return true, nil
+	}
+
 	err = local.QueryRowContext(ctx, `SELECT COUNT(*) FROM dim_account`).Scan(&n)
 	return n > 0, err
 }
