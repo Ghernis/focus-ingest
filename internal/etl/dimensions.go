@@ -98,15 +98,30 @@ func (p *Processor) upsertDimensions(ctx context.Context, tx *sql.Tx, rows []nor
 }
 
 func (p *Processor) upsertAccount(ctx context.Context, tx *sql.Tx, r normRow) error {
+	nk := r.ProviderCode + "|" + focus.PtrStr(r.BillingAccountId)
 	if p.Dialect == "sqlite" {
-		_, err := tx.ExecContext(ctx, `
+		existed, err := p.dimExists(ctx, tx, "dim_account", nk)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `
 			INSERT INTO dim_account (provider, account_id, account_name, billing_account_type)
 			VALUES (?, ?, ?, ?)
 			ON CONFLICT(provider, account_id) DO UPDATE SET
 			  account_name = COALESCE(excluded.account_name, dim_account.account_name),
 			  billing_account_type = COALESCE(excluded.billing_account_type, dim_account.billing_account_type)`,
 			r.ProviderCode, focus.PtrStr(r.BillingAccountId), nullStr(r.BillingAccountName), nullStr(r.BillingAccountType))
-		return err
+		if err != nil {
+			return err
+		}
+		if !existed {
+			sk, err := p.lookupAccountSK(ctx, tx, r.ProviderCode, focus.PtrStr(r.BillingAccountId))
+			if err != nil {
+				return err
+			}
+			return p.recordPendingDim(ctx, tx, "dim_account", nk, sk)
+		}
+		return nil
 	}
 	_, err := tx.ExecContext(ctx, `
 		MERGE dim_account AS t
@@ -130,8 +145,13 @@ func (p *Processor) upsertSubAccount(ctx context.Context, tx *sql.Tx, r normRow,
 			return err
 		}
 	}
+	nk := r.ProviderCode + "|" + focus.PtrStr(r.SubAccountId)
 	var err error
 	if p.Dialect == "sqlite" {
+		existed, err := p.dimExists(ctx, tx, "dim_sub_account", nk)
+		if err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO dim_sub_account (provider, sub_account_id, sub_account_name, sub_account_type, billing_account_sk)
 			VALUES (?, ?, ?, ?, ?)
@@ -140,7 +160,17 @@ func (p *Processor) upsertSubAccount(ctx context.Context, tx *sql.Tx, r normRow,
 			  sub_account_type = COALESCE(excluded.sub_account_type, dim_sub_account.sub_account_type),
 			  billing_account_sk = COALESCE(excluded.billing_account_sk, dim_sub_account.billing_account_sk)`,
 			r.ProviderCode, focus.PtrStr(r.SubAccountId), nullStr(r.SubAccountName), nullStr(r.SubAccountType), accSK)
-		return err
+		if err != nil {
+			return err
+		}
+		if !existed {
+			sk, err := p.lookupSubAccountSK(ctx, tx, r.ProviderCode, focus.PtrStr(r.SubAccountId))
+			if err != nil {
+				return err
+			}
+			return p.recordPendingDim(ctx, tx, "dim_sub_account", nk, sk)
+		}
+		return nil
 	}
 	_, err = tx.ExecContext(ctx, `
 		MERGE dim_sub_account AS t
@@ -157,8 +187,13 @@ func (p *Processor) upsertSubAccount(ctx context.Context, tx *sql.Tx, r normRow,
 }
 
 func (p *Processor) upsertService(ctx context.Context, tx *sql.Tx, r normRow) error {
+	nk := r.ProviderCode + "|" + r.ServiceCode
 	if p.Dialect == "sqlite" {
-		_, err := tx.ExecContext(ctx, `
+		existed, err := p.dimExists(ctx, tx, "dim_service", nk)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `
 			INSERT INTO dim_service (provider, service_code, service_name, service_category, service_subcategory)
 			VALUES (?, ?, ?, ?, ?)
 			ON CONFLICT(provider, service_code) DO UPDATE SET
@@ -166,7 +201,17 @@ func (p *Processor) upsertService(ctx context.Context, tx *sql.Tx, r normRow) er
 			  service_category = COALESCE(excluded.service_category, dim_service.service_category),
 			  service_subcategory = COALESCE(excluded.service_subcategory, dim_service.service_subcategory)`,
 			r.ProviderCode, r.ServiceCode, r.ServiceCode, nullStr(r.ServiceCategory), nullStr(r.ServiceSubcategory))
-		return err
+		if err != nil {
+			return err
+		}
+		if !existed {
+			sk, err := p.lookupServiceSK(ctx, tx, r.ProviderCode, r.ServiceCode)
+			if err != nil {
+				return err
+			}
+			return p.recordPendingDim(ctx, tx, "dim_service", nk, sk)
+		}
+		return nil
 	}
 	_, err := tx.ExecContext(ctx, `
 		MERGE dim_service AS t
@@ -183,12 +228,29 @@ func (p *Processor) upsertService(ctx context.Context, tx *sql.Tx, r normRow) er
 }
 
 func (p *Processor) upsertRegion(ctx context.Context, tx *sql.Tx, r normRow) error {
+	nk := r.ProviderCode + "|" + focus.PtrStr(r.RegionId)
 	if p.Dialect == "sqlite" {
-		_, err := tx.ExecContext(ctx, `
+		existed, err := p.dimExists(ctx, tx, "dim_region", nk)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `
 			INSERT INTO dim_region (provider, region_id, region_name) VALUES (?, ?, ?)
 			ON CONFLICT(provider, region_id) DO UPDATE SET region_name = COALESCE(excluded.region_name, dim_region.region_name)`,
 			r.ProviderCode, focus.PtrStr(r.RegionId), nullStr(r.RegionName))
-		return err
+		if err != nil {
+			return err
+		}
+		if !existed {
+			var sk int64
+			err = tx.QueryRowContext(ctx, `SELECT region_sk FROM dim_region WHERE provider = ? AND region_id = ?`,
+				r.ProviderCode, focus.PtrStr(r.RegionId)).Scan(&sk)
+			if err != nil {
+				return err
+			}
+			return p.recordPendingDim(ctx, tx, "dim_region", nk, sk)
+		}
+		return nil
 	}
 	_, err := tx.ExecContext(ctx, `
 		MERGE dim_region AS t USING (SELECT @p1 provider, @p2 region_id, @p3 region_name) s
@@ -200,8 +262,13 @@ func (p *Processor) upsertRegion(ctx context.Context, tx *sql.Tx, r normRow) err
 }
 
 func (p *Processor) upsertSKU(ctx context.Context, tx *sql.Tx, r normRow) error {
+	nk := r.ProviderCode + "|" + focus.PtrStr(r.SkuId) + "|" + focus.PtrStr(r.SkuPriceId)
 	if p.Dialect == "sqlite" {
-		_, err := tx.ExecContext(ctx, `
+		existed, err := p.dimExists(ctx, tx, "dim_sku", nk)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `
 			INSERT INTO dim_sku (provider, sku_id, sku_price_id, sku_meter, sku_price_details, service_name)
 			VALUES (?, ?, ?, ?, ?, ?)
 			ON CONFLICT(provider, sku_id, sku_price_id) DO UPDATE SET
@@ -209,7 +276,19 @@ func (p *Processor) upsertSKU(ctx context.Context, tx *sql.Tx, r normRow) error 
 			  sku_price_details = COALESCE(excluded.sku_price_details, dim_sku.sku_price_details),
 			  service_name = COALESCE(excluded.service_name, dim_sku.service_name)`,
 			r.ProviderCode, focus.PtrStr(r.SkuId), nullStr(r.SkuPriceId), nullStr(r.SkuMeter), nullStr(r.SkuPriceDetails), nullStr(r.ServiceName))
-		return err
+		if err != nil {
+			return err
+		}
+		if !existed {
+			var sk int64
+			err = tx.QueryRowContext(ctx, `SELECT sku_sk FROM dim_sku WHERE provider = ? AND sku_id = ? AND IFNULL(sku_price_id,'') = ?`,
+				r.ProviderCode, focus.PtrStr(r.SkuId), focus.PtrStr(r.SkuPriceId)).Scan(&sk)
+			if err != nil {
+				return err
+			}
+			return p.recordPendingDim(ctx, tx, "dim_sku", nk, sk)
+		}
+		return nil
 	}
 	_, err := tx.ExecContext(ctx, `
 		MERGE dim_sku AS t USING (SELECT @p1 provider, @p2 sku_id, @p3 sku_price_id, @p4 sku_meter, @p5 sku_price_details, @p6 service_name) s
@@ -225,8 +304,13 @@ func (p *Processor) upsertSKU(ctx context.Context, tx *sql.Tx, r normRow) error 
 }
 
 func (p *Processor) upsertCommitment(ctx context.Context, tx *sql.Tx, r normRow) error {
+	nk := r.ProviderCode + "|" + focus.PtrStr(r.CommitmentDiscountId)
 	if p.Dialect == "sqlite" {
-		_, err := tx.ExecContext(ctx, `
+		existed, err := p.dimExists(ctx, tx, "dim_commitment_discount", nk)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `
 			INSERT INTO dim_commitment_discount (provider, commitment_discount_id, commitment_discount_name,
 			  commitment_discount_type, commitment_discount_category, commitment_discount_unit)
 			VALUES (?, ?, ?, ?, ?, ?)
@@ -237,7 +321,19 @@ func (p *Processor) upsertCommitment(ctx context.Context, tx *sql.Tx, r normRow)
 			  commitment_discount_unit = COALESCE(excluded.commitment_discount_unit, dim_commitment_discount.commitment_discount_unit)`,
 			r.ProviderCode, focus.PtrStr(r.CommitmentDiscountId), nullStr(r.CommitmentDiscountName),
 			nullStr(r.CommitmentDiscountType), nullStr(r.CommitmentDiscountCategory), nullStr(r.CommitmentDiscountUnit))
-		return err
+		if err != nil {
+			return err
+		}
+		if !existed {
+			var sk int64
+			err = tx.QueryRowContext(ctx, `SELECT commitment_sk FROM dim_commitment_discount WHERE provider = ? AND commitment_discount_id = ?`,
+				r.ProviderCode, focus.PtrStr(r.CommitmentDiscountId)).Scan(&sk)
+			if err != nil {
+				return err
+			}
+			return p.recordPendingDim(ctx, tx, "dim_commitment_discount", nk, sk)
+		}
+		return nil
 	}
 	_, err := tx.ExecContext(ctx, `
 		MERGE dim_commitment_discount AS t USING (
@@ -259,14 +355,31 @@ func (p *Processor) upsertCommitment(ctx context.Context, tx *sql.Tx, r normRow)
 }
 
 func (p *Processor) upsertCapacity(ctx context.Context, tx *sql.Tx, r normRow) error {
+	nk := r.ProviderCode + "|" + focus.PtrStr(r.CapacityReservationId)
 	if p.Dialect == "sqlite" {
-		_, err := tx.ExecContext(ctx, `
+		existed, err := p.dimExists(ctx, tx, "dim_capacity_reservation", nk)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `
 			INSERT INTO dim_capacity_reservation (provider, capacity_reservation_id, capacity_reservation_status)
 			VALUES (?, ?, ?)
 			ON CONFLICT(provider, capacity_reservation_id) DO UPDATE SET
 			  capacity_reservation_status = COALESCE(excluded.capacity_reservation_status, dim_capacity_reservation.capacity_reservation_status)`,
 			r.ProviderCode, focus.PtrStr(r.CapacityReservationId), nullStr(r.CapacityReservationStatus))
-		return err
+		if err != nil {
+			return err
+		}
+		if !existed {
+			var sk int64
+			err = tx.QueryRowContext(ctx, `SELECT capacity_reservation_sk FROM dim_capacity_reservation WHERE provider = ? AND capacity_reservation_id = ?`,
+				r.ProviderCode, focus.PtrStr(r.CapacityReservationId)).Scan(&sk)
+			if err != nil {
+				return err
+			}
+			return p.recordPendingDim(ctx, tx, "dim_capacity_reservation", nk, sk)
+		}
+		return nil
 	}
 	_, err := tx.ExecContext(ctx, `
 		MERGE dim_capacity_reservation AS t USING (SELECT @p1 provider, @p2 capacity_reservation_id, @p3 capacity_reservation_status) s
@@ -305,6 +418,15 @@ func (p *Processor) upsertResource(ctx context.Context, tx *sql.Tx, r normRow, c
 	if rtype == "" {
 		rtype = "UNKNOWN"
 	}
+	nk := resKey
+	existed := false
+	if p.Dialect == "sqlite" && p.TrackPendingDims {
+		var err error
+		existed, err = p.dimExists(ctx, tx, "dim_resource", nk)
+		if err != nil {
+			return err
+		}
+	}
 	if _, err := tx.ExecContext(ctx, p.q(`
 		INSERT INTO dim_resource (provider, global_resource_id, resource_type, account_sk, sub_account_sk, service_sk,
 		  region, name, application, environment, business, cost_center,owner_email, tags_json, valid_from)
@@ -323,6 +445,11 @@ func (p *Processor) upsertResource(ctx context.Context, tx *sql.Tx, r normRow, c
 		WHERE provider = ? AND global_resource_id = ? AND valid_to IS NULL`),
 		r.ProviderCode, focus.PtrStr(r.ResourceId)).Scan(&sk); err == nil {
 		cache.resource[resKey] = sk
+		if p.Dialect == "sqlite" && p.TrackPendingDims && !existed {
+			if err := p.recordPendingDim(ctx, tx, "dim_resource", nk, sk); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

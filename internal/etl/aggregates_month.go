@@ -36,10 +36,24 @@ func (p *Processor) rebuildAggregatesForMonth(ctx context.Context, tx *sql.Tx, m
 	if err := p.rebuildCostDistributionForMonth(ctx, tx, month); err != nil {
 		return err
 	}
+	return p.RebuildCostAnomaliesForMonth(ctx, tx, month)
+}
+
+// RebuildCostAnomaliesForMonth recomputes anomaly rows for one billing month using agg_app_* history on the DB.
+func (p *Processor) RebuildCostAnomaliesForMonth(ctx context.Context, tx *sql.Tx, month string) error {
 	return p.rebuildCostAnomaliesForMonth(ctx, tx, month)
 }
 
-func (p *Processor) deleteAggregatesForMonth(ctx context.Context, tx *sql.Tx, month string) error {
+// DeleteAggregatesForMonth removes aggregate rows scoped to one billing month (excludes anomaly if skipAnomaly).
+func (p *Processor) DeleteAggregatesForMonth(ctx context.Context, tx *sql.Tx, month string, skipAnomaly bool) error {
+	return p.deleteAggregatesForMonth(ctx, tx, month, skipAnomaly)
+}
+
+func (p *Processor) deleteAggregatesForMonth(ctx context.Context, tx *sql.Tx, month string, skipAnomaly ...bool) error {
+	skip := false
+	if len(skipAnomaly) > 0 {
+		skip = skipAnomaly[0]
+	}
 	m := monthEq("month_start", month)
 	bm := monthEq("billing_period_start", month)
 	tables := []struct {
@@ -54,8 +68,13 @@ func (p *Processor) deleteAggregatesForMonth(ctx context.Context, tx *sql.Tx, mo
 		{"agg_app_service_monthly", m},
 		{"agg_app_service_resource_monthly", m},
 		{"agg_cost_distribution_monthly", m},
-		{"agg_cost_anomaly_monthly", m},
 		{"agg_cost_daily", bm},
+	}
+	if !skip {
+		tables = append(tables, struct {
+			table string
+			where string
+		}{"agg_cost_anomaly_monthly", m})
 	}
 	for _, t := range tables {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM "+t.table+" WHERE "+t.where); err != nil {

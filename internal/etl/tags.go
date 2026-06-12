@@ -96,8 +96,19 @@ func (p *Processor) buildTags(ctx context.Context, tx *sql.Tx, batchID int64, ro
 			continue
 		}
 		if p.Dialect == "sqlite" {
+			nk := parts[0] + "\x00" + parts[1]
+			existed, err := p.dimExists(ctx, tx, "dim_tag", nk)
+			if err != nil {
+				return err
+			}
 			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO dim_tag (tag_key, tag_value) VALUES (?, ?)`, parts[0], parts[1]); err != nil {
 				return err
+			}
+			if p.TrackPendingDims && !existed {
+				var sk int64
+				if err := tx.QueryRowContext(ctx, `SELECT tag_sk FROM dim_tag WHERE tag_key = ? AND tag_value = ?`, parts[0], parts[1]).Scan(&sk); err == nil {
+					_ = p.recordPendingDim(ctx, tx, "dim_tag", nk, sk)
+				}
 			}
 		} else {
 			if _, err := tx.ExecContext(ctx, `
@@ -154,6 +165,11 @@ func (p *Processor) loadTagSKMap(ctx context.Context, tx *sql.Tx) (map[string]in
 		m[key+"\x00"+val] = sk
 	}
 	return m, rows.Err()
+}
+
+// GrainLookupKey matches fact rows to staging tag rows (subset of full fact grain).
+func GrainLookupKey(chargeDate string, accSK, subSK, resSK, svcSK, catSK int64, hash, billStart string) string {
+	return grainLookupKey(chargeDate, accSK, subSK, resSK, svcSK, catSK, hash, billStart)
 }
 
 func grainLookupKey(chargeDate string, accSK, subSK, resSK, svcSK, catSK int64, hash, billStart string) string {

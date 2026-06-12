@@ -12,11 +12,12 @@ import (
 )
 
 type Processor struct {
-	DB             *sql.DB
-	Dialect        string // "sqlite" or "sqlserver"
-	SkipTags       bool
-	SkipAggregates bool
-	UseGoETL       bool // SQL Server only: force row-by-row Go ETL instead of set-based SQL
+	DB               *sql.DB
+	Dialect          string // "sqlite" or "sqlserver"
+	SkipTags         bool
+	SkipAggregates   bool
+	UseGoETL         bool // SQL Server only: force row-by-row Go ETL instead of set-based SQL
+	TrackPendingDims bool // SQLite only: record new dimensions in dim_sync_pending
 }
 
 type normRow struct {

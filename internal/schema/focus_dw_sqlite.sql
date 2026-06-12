@@ -150,6 +150,20 @@ CREATE TABLE IF NOT EXISTS dim_application (
 
 CREATE INDEX IF NOT EXISTS IX_dim_application_name ON dim_application (application_name);
 
+-- Hybrid publish: track dimensions created locally after sync-dims (not yet on server).
+CREATE TABLE IF NOT EXISTS dim_sync_pending (
+  dim_table    TEXT NOT NULL,
+  natural_key  TEXT NOT NULL,
+  local_sk     INTEGER NOT NULL,
+  PRIMARY KEY (dim_table, natural_key)
+);
+
+-- Max surrogate key per dim table after last sync-dims from SQL Server.
+CREATE TABLE IF NOT EXISTS dim_sync_seeded_max (
+  dim_table TEXT NOT NULL PRIMARY KEY,
+  max_sk    INTEGER NOT NULL
+);
+
 INSERT OR IGNORE INTO dim_application (application_name, alias_values)
 VALUES ('(UNASSIGNED)', '(Unassigned)');
 

@@ -14,6 +14,7 @@ import (
 	"github.com/ghernis/focus_dt/internal/config"
 	"github.com/ghernis/focus_dt/internal/focus"
 	pqread "github.com/ghernis/focus_dt/internal/parquet"
+	"github.com/ghernis/focus_dt/internal/publish"
 	"github.com/ghernis/focus_dt/internal/store"
 )
 
@@ -33,6 +34,9 @@ var (
 	rebuildAggs        bool
 	rebuildAggFull     bool
 	processETLBatchIDs []int64
+	syncFresh          bool
+	billingPeriod      string
+	publishFacts       bool
 )
 
 func main() {
@@ -54,9 +58,11 @@ func main() {
 	root.PersistentFlags().BoolVar(&forceImport, "force", false, "Re-import a file even if it was already processed successfully")
 
 	root.AddCommand(schemaCmd())
+	root.AddCommand(syncDimsCmd())
 	root.AddCommand(importCmd())
 	root.AddCommand(processETLCmd())
 	root.AddCommand(rebuildCmd())
+	root.AddCommand(publishCmd())
 	root.AddCommand(validateCmd())
 
 	if err := root.Execute(); err != nil {
@@ -101,12 +107,91 @@ func schemaCmd() *cobra.Command {
 	return cmd
 }
 
+func syncDimsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sync-dims",
+		Short: "Copy SQL Server dimensions into local SQLite (seed before local ETL)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			conn := cfg.Connection
+			if conn == "" {
+				conn = os.Getenv("FOCUS_DATABASE_URL")
+			}
+			ctx := cmd.Context()
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			return publish.SyncDims(ctx, publish.SyncDimsOptions{
+				Connection: conn,
+				SQLitePath: cfg.SQLitePath,
+				Fresh:      syncFresh,
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&syncFresh, "fresh", false, "Delete and recreate local SQLite before copying dimensions")
+	return cmd
+}
+
+func publishCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "publish",
+		Short: "Publish local SQLite aggregates and dimensions to SQL Server",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if billingPeriod == "" {
+				return fmt.Errorf("--billing-period is required (YYYY-MM-DD)")
+			}
+			conn := connection
+			if conn == "" {
+				conn = os.Getenv("FOCUS_DATABASE_URL")
+			}
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			ctx := cmd.Context()
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			return publish.Publish(ctx, publish.Options{
+				Connection:    conn,
+				SQLitePath:    cfg.SQLitePath,
+				BillingPeriod: billingPeriod,
+				PublishFacts:  publishFacts,
+			})
+		},
+	}
+	cmd.Flags().StringVar(&billingPeriod, "billing-period", "", "Billing period start date to publish (YYYY-MM-DD)")
+	cmd.Flags().BoolVar(&publishFacts, "facts", false, "Also publish fact_focus_cost_daily and tag bridge for this month")
+	return cmd
+}
+
 func importCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "import [parquet files...]",
 		Short: "Import FOCUS parquet files into staging and run ETL",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			if cfg.Local {
+				conn := cfg.Connection
+				if conn == "" {
+					conn = os.Getenv("FOCUS_DATABASE_URL")
+				}
+				ctx := cmd.Context()
+				if ctx == nil {
+					ctx = context.Background()
+				}
+				if err := publish.AutoSyncDimsIfEmpty(ctx, conn, cfg.SQLitePath); err != nil {
+					return err
+				}
+			}
+
 			s, err := openStore()
 			if err != nil {
 				return err

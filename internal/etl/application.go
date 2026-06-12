@@ -112,8 +112,16 @@ func (p *Processor) upsertApplicationAlias(ctx context.Context, tx *sql.Tx, raw,
 				UPDATE dim_application SET alias_values = @p1, updated_utc = SYSUTCDATETIME()
 				WHERE application_name = @p2`, nullIfEmptyAlias(merged), canon)
 		}
-		if err == nil && cache != nil {
-			cache[canon] = merged
+		if err == nil {
+			if p.Dialect == "sqlite" && p.TrackPendingDims {
+				var sk int64
+				if qerr := tx.QueryRowContext(ctx, `SELECT application_sk FROM dim_application WHERE application_name = ?`, canon).Scan(&sk); qerr == nil {
+					_ = p.recordPendingDim(ctx, tx, "dim_application", canon, sk)
+				}
+			}
+			if cache != nil {
+				cache[canon] = merged
+			}
 		}
 		return err
 	}
@@ -143,11 +151,19 @@ func (p *Processor) upsertApplicationAlias(ctx context.Context, tx *sql.Tx, raw,
 			VALUES (@p1, @p2, @p3, SYSUTCDATETIME(), SYSUTCDATETIME())`,
 			canon, nullIfEmptyAlias(aliases), firstSeen)
 	}
-	if err == nil && cache != nil {
-		if s, ok := nullIfEmptyAlias(aliases).(string); ok {
-			cache[canon] = s
-		} else {
-			cache[canon] = ""
+	if err == nil {
+		if p.Dialect == "sqlite" && p.TrackPendingDims {
+			var sk int64
+			if qerr := tx.QueryRowContext(ctx, `SELECT application_sk FROM dim_application WHERE application_name = ?`, canon).Scan(&sk); qerr == nil {
+				_ = p.recordPendingDim(ctx, tx, "dim_application", canon, sk)
+			}
+		}
+		if cache != nil {
+			if s, ok := nullIfEmptyAlias(aliases).(string); ok {
+				cache[canon] = s
+			} else {
+				cache[canon] = ""
+			}
 		}
 	}
 	return err

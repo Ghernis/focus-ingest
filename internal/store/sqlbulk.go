@@ -9,6 +9,11 @@ import (
 	"github.com/ghernis/focus_dt/internal/sqlserver"
 )
 
+// ExecSQLServerMultiInsert bulk-inserts rows using @p1.. parameter placeholders.
+func ExecSQLServerMultiInsert(ctx context.Context, tx *sql.Tx, prefixSQL string, colsPerRow int, rows [][]interface{}) error {
+	return execSQLServerMultiInsert(ctx, tx, prefixSQL, colsPerRow, rows)
+}
+
 func execSQLServerMultiInsert(ctx context.Context, tx *sql.Tx, prefixSQL string, colsPerRow int, rows [][]interface{}) error {
 	if len(rows) == 0 {
 		return nil

@@ -101,7 +101,13 @@ func (s *sqliteStore) InsertStaging(ctx context.Context, batchID int64, focusVer
 }
 
 func (s *sqliteStore) ProcessBatch(ctx context.Context, batchID int64, focusVersion string) error {
-	p := &etl.Processor{DB: s.db, Dialect: "sqlite", SkipTags: s.skipTags, SkipAggregates: s.skipAggregates}
+	p := &etl.Processor{
+		DB:               s.db,
+		Dialect:          "sqlite",
+		SkipTags:         s.skipTags,
+		SkipAggregates:   s.skipAggregates,
+		TrackPendingDims: true,
+	}
 	return p.ProcessBatch(ctx, batchID, focusVersion)
 }
 
@@ -147,6 +153,11 @@ func execSQLScript(ctx context.Context, db *sql.DB, script string) error {
 		}
 	}
 	return nil
+}
+
+// SplitSQL splits a DDL script on semicolon-terminated statements.
+func SplitSQL(script string) []string {
+	return splitSQL(script)
 }
 
 func splitSQL(script string) []string {
