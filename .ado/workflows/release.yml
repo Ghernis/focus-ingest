@@ -1,7 +1,3 @@
-# Build and publish focus-ingest binaries as a Universal Package on version tags.
-# Point your Azure DevOps pipeline at this file and ensure tag builds are enabled
-# (Pipelines > your pipeline > ... > Triggers > Override YAML trigger > Tags).
-
 trigger:
   branches:
     exclude:
@@ -17,7 +13,6 @@ pool:
 
 variables:
   releaseTag: $(Build.SourceBranchName)
-  artifactFeed: devopsutils
   packageName: focus-ingest
 
 stages:
