@@ -56,6 +56,13 @@ func (s *sqlserverStore) Dialect() string { return "sqlserver" }
 
 func (s *sqlserverStore) Close() error { return s.db.Close() }
 
+func (s *sqlserverStore) ResetSchema(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, schema.SQLServerResetDDL); err != nil {
+		return fmt.Errorf("schema reset: %w", err)
+	}
+	return nil
+}
+
 func (s *sqlserverStore) ApplySchema(ctx context.Context) error {
 	for i, batch := range splitOnGO(schema.SQLServerDDL) {
 		batch = strings.TrimSpace(batch)

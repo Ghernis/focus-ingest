@@ -104,6 +104,25 @@ func schemaCmd() *cobra.Command {
 		},
 	}
 	cmd.AddCommand(apply)
+	reset := &cobra.Command{
+		Use:   "reset",
+		Short: "Drop all warehouse tables (destructive; SQL Server or local SQLite)",
+		Long: `Drops all FOCUS warehouse tables. On SQL Server, disables FK checks and drops all dbo tables.
+Then run schema apply to recreate an empty warehouse.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer s.Close()
+			if err := s.ResetSchema(cmd.Context()); err != nil {
+				return err
+			}
+			fmt.Printf("Warehouse reset (%s). Run: focus-ingest schema apply\n", s.Dialect())
+			return nil
+		},
+	}
+	cmd.AddCommand(reset)
 	return cmd
 }
 

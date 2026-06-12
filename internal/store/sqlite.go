@@ -52,6 +52,35 @@ func (s *sqliteStore) ApplySchema(ctx context.Context) error {
 	return execSQLScript(ctx, s.db, schema.SQLiteDDL)
 }
 
+func (s *sqliteStore) ResetSchema(ctx context.Context) error {
+	tables, err := s.db.QueryContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`)
+	if err != nil {
+		return err
+	}
+	defer tables.Close()
+	var names []string
+	for tables.Next() {
+		var n string
+		if err := tables.Scan(&n); err != nil {
+			return err
+		}
+		names = append(names, n)
+	}
+	if err := tables.Err(); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
+		return err
+	}
+	for _, n := range names {
+		if _, err := s.db.ExecContext(ctx, `DROP TABLE IF EXISTS `+n); err != nil {
+			return fmt.Errorf("drop %s: %w", n, err)
+		}
+	}
+	_, _ = s.db.ExecContext(ctx, `PRAGMA foreign_keys=ON`)
+	return s.ApplySchema(ctx)
+}
+
 func (s *sqliteStore) BeginBatch(ctx context.Context, meta BatchMeta) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO dim_ingestion_batch (source_provider, focus_version, source_file, status)

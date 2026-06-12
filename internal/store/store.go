@@ -42,6 +42,7 @@ type ValidationReport struct {
 
 type Store interface {
 	ApplySchema(ctx context.Context) error
+	ResetSchema(ctx context.Context) error
 	BeginBatch(ctx context.Context, meta BatchMeta) (int64, error)
 	InsertStaging(ctx context.Context, batchID int64, focusVersion, sourceFile string, rows []focus.StagingRow) error
 	ProcessBatch(ctx context.Context, batchID int64, focusVersion string) error

@@ -7,3 +7,6 @@ var SQLiteDDL string
 
 //go:embed focus_dw.sql
 var SQLServerDDL string
+
+//go:embed reset_sqlserver.sql
+var SQLServerResetDDL string
