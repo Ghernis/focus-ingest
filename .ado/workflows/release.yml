@@ -1,0 +1,65 @@
+# Build and publish focus-ingest binaries as a Universal Package on version tags.
+# Point your Azure DevOps pipeline at this file and ensure tag builds are enabled
+# (Pipelines > your pipeline > ... > Triggers > Override YAML trigger > Tags).
+
+trigger:
+  branches:
+    exclude:
+      - '*'
+  tags:
+    include:
+      - v*
+
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  releaseTag: $(Build.SourceBranchName)
+  artifactFeed: devopsutils
+  packageName: focus-ingest
+
+stages:
+- stage: Build
+  displayName: Build and publish
+  jobs:
+  - job: Release
+    displayName: Build and publish release
+    steps:
+    - checkout: self
+      fetchDepth: 0
+
+    - task: GoTool@0
+      displayName: Set up Go
+      inputs:
+        version: '1.25.7'
+
+    - script: go mod tidy
+      displayName: Tidy Go modules
+
+    - script: |
+        GOOS=linux GOARCH=amd64 go build -o focus-ingest ./cmd/focus-ingest/main.go
+        GOOS=windows GOARCH=amd64 go build -o focus-ingest.exe ./cmd/focus-ingest/main.go
+      displayName: Build binaries
+
+    - task: CopyFiles@2
+      displayName: Stage release binaries
+      inputs:
+        SourceFolder: $(System.DefaultWorkingDirectory)
+        Contents: |
+          focus-ingest
+          focus-ingest.exe
+        TargetFolder: $(Build.ArtifactStagingDirectory)
+
+    - task: UniversalPackages@0
+      displayName: Publish Universal Package
+      inputs:
+        command: publish
+        publishDirectory: $(Build.ArtifactStagingDirectory)
+        feedsToUsePublish: internal
+        vstsFeedPublish: $(artifactFeed)
+        vstsFeedPackagePublish: $(packageName)
+        versionOption: custom
+        versionPublish: $(releaseTag)
+        packagePublishDescription: focus-ingest release $(releaseTag)
