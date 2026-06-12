@@ -77,18 +77,6 @@ func publishPendingDims(ctx context.Context, local, server *sql.DB) (map[string]
 	return realign, nil
 }
 
-func remapSK(m map[string]map[int64]int64, table string, sk int64) int64 {
-	if m == nil {
-		return sk
-	}
-	if inner, ok := m[table]; ok {
-		if v, ok := inner[sk]; ok {
-			return v
-		}
-	}
-	return sk
-}
-
 func mergePendingDim(ctx context.Context, local, server *sql.DB, p pendingDim, realign map[string]map[int64]int64) (int64, error) {
 	switch p.Table {
 	case "dim_account":
