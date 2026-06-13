@@ -59,7 +59,11 @@ func Publish(ctx context.Context, opts Options) error {
 	}
 	if len(realign) > 0 {
 		fmt.Printf("  realigning %d dimension SK mapping(s) in local DB\n", countRealign(realign))
-		if err := realignLocalSKs(ctx, local, realign); err != nil {
+		months, err := distinctBillingMonths(ctx, local)
+		if err != nil {
+			return fmt.Errorf("billing months: %w", err)
+		}
+		if err := realignLocalSKs(ctx, local, realign, months); err != nil {
 			return fmt.Errorf("realign: %w", err)
 		}
 	}

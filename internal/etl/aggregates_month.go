@@ -23,6 +23,19 @@ func (p *Processor) rebuildAggregatesForMonths(ctx context.Context, months []str
 	return nil
 }
 
+// RebuildAggregatesForMonth rebuilds all aggregate tables for one billing month.
+func (p *Processor) RebuildAggregatesForMonth(ctx context.Context, month string) error {
+	tx, err := p.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if err := p.rebuildAggregatesForMonth(ctx, tx, month); err != nil {
+		tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
 func (p *Processor) rebuildAggregatesForMonth(ctx context.Context, tx *sql.Tx, month string) error {
 	if err := p.deleteAggregatesForMonth(ctx, tx, month); err != nil {
 		return err

@@ -7,7 +7,8 @@ import (
 )
 
 // realignLocalSKs updates local SQLite FK columns when server assigned different surrogate keys.
-func realignLocalSKs(ctx context.Context, local *sql.DB, maps map[string]map[int64]int64) error {
+// Aggregate tables are rebuilt from facts after realign (not updated in place).
+func realignLocalSKs(ctx context.Context, local *sql.DB, maps map[string]map[int64]int64, billingMonths []string) error {
 	if len(maps) == 0 {
 		return nil
 	}
@@ -39,20 +40,8 @@ func realignLocalSKs(ctx context.Context, local *sql.DB, maps map[string]map[int
 		return fmt.Errorf("dim parent fks: %w", err)
 	}
 
-	for _, u := range realignFKUpdates {
-		m := maps[u.dim]
-		if len(m) == 0 {
-			continue
-		}
-		for oldSK, newSK := range m {
-			if oldSK == newSK {
-				continue
-			}
-			q := fmt.Sprintf(`UPDATE %s SET %s = ? WHERE %s = ?`, u.table, u.col, u.col)
-			if _, err := tx.ExecContext(ctx, q, newSK, oldSK); err != nil {
-				return fmt.Errorf("realign %s.%s %d->%d: %w", u.table, u.col, oldSK, newSK, err)
-			}
-		}
+	if err := realignFactsAndBridge(ctx, tx, maps); err != nil {
+		return fmt.Errorf("facts/bridge: %w", err)
 	}
 
 	for dim, m := range maps {
@@ -73,40 +62,17 @@ func realignLocalSKs(ctx context.Context, local *sql.DB, maps map[string]map[int
 		}
 	}
 
-	return tx.Commit()
-}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
 
-type fkUpdate struct {
-	table string
-	col   string
-	dim   string
-}
-
-var realignFKUpdates = []fkUpdate{
-	{"fact_focus_cost_daily", "billing_account_sk", "dim_account"},
-	{"fact_focus_cost_daily", "sub_account_sk", "dim_sub_account"},
-	{"fact_focus_cost_daily", "resource_sk", "dim_resource"},
-	{"fact_focus_cost_daily", "service_sk", "dim_service"},
-	{"fact_focus_cost_daily", "sku_sk", "dim_sku"},
-	{"fact_focus_cost_daily", "region_sk", "dim_region"},
-	{"fact_focus_cost_daily", "commitment_sk", "dim_commitment_discount"},
-	{"fact_focus_cost_daily", "capacity_reservation_sk", "dim_capacity_reservation"},
-	{"bridge_cost_tag", "tag_sk", "dim_tag"},
-	{"agg_cost_daily", "sub_account_sk", "dim_sub_account"},
-	{"agg_cost_daily", "service_sk", "dim_service"},
-	{"agg_cost_daily", "region_sk", "dim_region"},
-	{"agg_cost_monthly", "sub_account_sk", "dim_sub_account"},
-	{"agg_commitment_utilization", "commitment_sk", "dim_commitment_discount"},
-	{"agg_commitment_utilization_daily", "commitment_sk", "dim_commitment_discount"},
-	{"agg_savings_summary", "service_sk", "dim_service"},
-	{"agg_app_monthly", "application_sk", "dim_application"},
-	{"agg_app_service_monthly", "application_sk", "dim_application"},
-	{"agg_app_service_monthly", "service_sk", "dim_service"},
-	{"agg_app_service_resource_monthly", "application_sk", "dim_application"},
-	{"agg_app_service_resource_monthly", "service_sk", "dim_service"},
-	{"agg_app_service_resource_monthly", "resource_sk", "dim_resource"},
-	{"agg_cost_anomaly_monthly", "application_sk", "dim_application"},
-	{"agg_cost_anomaly_monthly", "service_sk", "dim_service"},
+	if len(billingMonths) > 0 {
+		fmt.Println("  rebuilding local aggregates after SK realign...")
+		if err := rebuildLocalAggregatesAfterRealign(ctx, local, billingMonths); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // realignDimParentFKs updates FK columns inside dimension tables before old PK rows are deleted.
