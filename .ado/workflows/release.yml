@@ -34,8 +34,8 @@ stages:
       displayName: Tidy Go modules
 
     - script: |
-        GOOS=linux GOARCH=amd64 go build -o focus-ingest ./cmd/focus-ingest/main.go
-        GOOS=windows GOARCH=amd64 go build -o focus-ingest.exe ./cmd/focus-ingest/main.go
+        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o focus-ingest ./cmd/focus-ingest/main.go
+        CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o focus-ingest.exe ./cmd/focus-ingest/main.go
       displayName: Build binaries
 
     - task: CopyFiles@2

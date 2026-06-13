@@ -26,8 +26,8 @@ jobs:
 
     - name: Build binaries
       run: |
-        GOOS=linux GOARCH=amd64 go build -o focus-ingest ./cmd/focus-ingest/main.go
-        GOOS=windows GOARCH=amd64 go build -o focus-ingest.exe ./cmd/focus-ingest/main.go
+        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o focus-ingest ./cmd/focus-ingest/main.go
+        CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o focus-ingest.exe ./cmd/focus-ingest/main.go
 
     - name: Upload Release Assets
       uses: softprops/action-gh-release@v2

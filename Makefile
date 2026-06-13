@@ -15,8 +15,8 @@ build-linux:
 	@test -n "$(CMDS)" || (echo "No commands found under cmd/*/main.go" && exit 1)
 	@mkdir -p bin/linux
 	@for cmd in $(CMDS); do \
-		echo "Building $$cmd for linux"; \
-		GOOS=linux GOARCH=$(GOARCH) $(GO) build -o bin/linux/$$cmd ./cmd/$$cmd || exit $$?; \
+		echo "Building $$cmd for linux (static, CGO_ENABLED=0)"; \
+		CGO_ENABLED=0 GOOS=linux GOARCH=$(GOARCH) $(GO) build -o bin/linux/$$cmd ./cmd/$$cmd || exit $$?; \
 	done
 
 build-windows:
