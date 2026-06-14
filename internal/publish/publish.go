@@ -53,23 +53,16 @@ func Publish(ctx context.Context, opts Options) error {
 	}
 
 	fmt.Println("Publishing pending dimensions to SQL Server...")
-	realign, err := publishPendingDims(ctx, local, server)
+	skMap, err := publishPendingDims(ctx, local, server)
 	if err != nil {
 		return fmt.Errorf("dimensions: %w", err)
 	}
-	if len(realign) > 0 {
-		fmt.Printf("  realigning %d dimension SK mapping(s) in local DB\n", countRealign(realign))
-		months, err := distinctBillingMonths(ctx, local)
-		if err != nil {
-			return fmt.Errorf("billing months: %w", err)
-		}
-		if err := realignLocalSKs(ctx, local, realign, months); err != nil {
-			return fmt.Errorf("realign: %w", err)
-		}
+	if n := countRealign(skMap); n > 0 {
+		fmt.Printf("  %d local SK(s) differ from server — remapping at publish time (no local DB rewrite)\n", n)
 	}
 
 	fmt.Printf("Publishing aggregates for %s...\n", month)
-	if err := publishAggregates(ctx, local, server, month); err != nil {
+	if err := publishAggregates(ctx, local, server, month, skMap); err != nil {
 		return fmt.Errorf("aggregates: %w", err)
 	}
 
@@ -79,13 +72,13 @@ func Publish(ctx context.Context, opts Options) error {
 			return fmt.Errorf("batch: %w", err)
 		}
 		fmt.Printf("Publishing facts for %s (batch %d)...\n", month, batchID)
-		n, err := publishFacts(ctx, local, server, month, batchID)
+		n, err := publishFacts(ctx, local, server, month, batchID, skMap)
 		if err != nil {
 			return fmt.Errorf("facts: %w", err)
 		}
 		fmt.Printf("  published %d fact rows\n", n)
 
-		nb, err := publishBridge(ctx, local, server, month)
+		nb, err := publishBridge(ctx, local, server, month, skMap)
 		if err != nil {
 			return fmt.Errorf("bridge: %w", err)
 		}

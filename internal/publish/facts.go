@@ -8,7 +8,21 @@ import (
 	"github.com/ghernis/focus_dt/internal/store"
 )
 
-func publishFacts(ctx context.Context, local, server *sql.DB, month string, batchID int64) (int, error) {
+var factSKCols = map[int]string{
+	1:  "dim_account",
+	2:  "dim_sub_account",
+	3:  "dim_resource",
+	4:  "dim_service",
+	5:  "dim_sku",
+	6:  "dim_region",
+	9:  "dim_commitment_discount",
+	11: "dim_capacity_reservation",
+}
+
+var publishFactGrainCols = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 13, 14, 15, 16, 29, 30}
+var factSumCols = []int{17, 18, 19, 20, 21, 22, 23}
+
+func publishFacts(ctx context.Context, local, server *sql.DB, month string, batchID int64, maps skMaps) (int, error) {
 	tx, err := server.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -40,16 +54,30 @@ func publishFacts(ctx context.Context, local, server *sql.DB, month string, batc
 	}
 	defer rows.Close()
 
-	prefix := fmt.Sprintf(`INSERT INTO fact_focus_cost_daily (%s) VALUES `, cols)
-	var batch [][]interface{}
-	total := 0
+	merged := map[string][]interface{}{}
 	for rows.Next() {
 		vals, err := scanN(rows, colCount)
 		if err != nil {
-			return total, err
+			return 0, err
 		}
-		// Replace local ingestion_batch_id with server batch id.
+		applySKRemap(vals, factSKCols, maps)
 		vals[28] = batchID
+		key := grainKey(vals, publishFactGrainCols)
+		if prev, ok := merged[key]; ok {
+			mergeRows(prev, vals, factSumCols, false)
+			prev[24] = sumIntVals(prev[24], vals[24]) // line_count
+		} else {
+			merged[key] = append([]interface{}(nil), vals...)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	prefix := fmt.Sprintf(`INSERT INTO fact_focus_cost_daily (%s) VALUES `, cols)
+	var batch [][]interface{}
+	total := 0
+	for _, vals := range merged {
 		batch = append(batch, vals)
 		if len(batch) >= 100 {
 			if err := store.ExecSQLServerMultiInsert(ctx, tx, prefix, colCount, batch); err != nil {
@@ -58,9 +86,6 @@ func publishFacts(ctx context.Context, local, server *sql.DB, month string, batc
 			total += len(batch)
 			batch = batch[:0]
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return total, err
 	}
 	if len(batch) > 0 {
 		if err := store.ExecSQLServerMultiInsert(ctx, tx, prefix, colCount, batch); err != nil {

@@ -62,7 +62,8 @@ func publishPendingDims(ctx context.Context, local, server *sql.DB) (map[string]
 		return nil, err
 	}
 	realign := map[string]map[int64]int64{}
-	for _, p := range pending {
+	total := len(pending)
+	for i, p := range pending {
 		serverSK, err := mergePendingDim(ctx, local, server, p, realign)
 		if err != nil {
 			return nil, fmt.Errorf("%s %s: %w", p.Table, p.NaturalKey, err)
@@ -72,6 +73,9 @@ func publishPendingDims(ctx context.Context, local, server *sql.DB) (map[string]
 				realign[p.Table] = map[int64]int64{}
 			}
 			realign[p.Table][p.LocalSK] = serverSK
+		}
+		if (i+1)%500 == 0 || i+1 == total {
+			fmt.Printf("  dimensions: %d / %d\n", i+1, total)
 		}
 	}
 	return realign, nil

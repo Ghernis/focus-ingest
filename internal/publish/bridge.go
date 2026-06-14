@@ -13,8 +13,8 @@ type tagBridgeRow struct {
 	TagSK    int64
 }
 
-func publishBridge(ctx context.Context, local, server *sql.DB, month string) (int, error) {
-	localPairs, err := loadLocalBridgePairs(ctx, local, month)
+func publishBridge(ctx context.Context, local, server *sql.DB, month string, maps skMaps) (int, error) {
+	localPairs, err := loadLocalBridgePairs(ctx, local, month, maps)
 	if err != nil {
 		return 0, err
 	}
@@ -41,7 +41,8 @@ func publishBridge(ctx context.Context, local, server *sql.DB, month string) (in
 		if costID == 0 {
 			continue
 		}
-		batch = append(batch, []interface{}{costID, p.TagSK})
+		tagSK := maps.remap("dim_tag", p.TagSK)
+		batch = append(batch, []interface{}{costID, tagSK})
 		if len(batch) >= 500 {
 			if err := store.ExecSQLServerMultiInsert(ctx, tx, prefix, 2, batch); err != nil {
 				return total, err
@@ -62,7 +63,7 @@ func publishBridge(ctx context.Context, local, server *sql.DB, month string) (in
 	return total, nil
 }
 
-func loadLocalBridgePairs(ctx context.Context, local *sql.DB, month string) ([]tagBridgeRow, error) {
+func loadLocalBridgePairs(ctx context.Context, local *sql.DB, month string, maps skMaps) ([]tagBridgeRow, error) {
 	q := `
 		SELECT f.charge_date, f.billing_account_sk,
 		  IFNULL(f.sub_account_sk,-1), IFNULL(f.resource_sk,-1), f.service_sk, f.charge_category_sk,
@@ -83,7 +84,14 @@ func loadLocalBridgePairs(ctx context.Context, local *sql.DB, month string) ([]t
 		if err := rows.Scan(&chargeDate, &accSK, &subSK, &resSK, &svcSK, &catSK, &hash, &billStart, &tagSK); err != nil {
 			return nil, err
 		}
-		key := etl.GrainLookupKey(chargeDate, accSK, subSK, resSK, svcSK, catSK, hash, billStart)
+		key := etl.GrainLookupKey(
+			chargeDate,
+			int64FromRemap(maps.remap("dim_account", accSK)),
+			int64FromRemap(maps.remap("dim_sub_account", subSK)),
+			int64FromRemap(maps.remap("dim_resource", resSK)),
+			int64FromRemap(maps.remap("dim_service", svcSK)),
+			catSK, hash, billStart,
+		)
 		out = append(out, tagBridgeRow{GrainKey: key, TagSK: tagSK})
 	}
 	return out, rows.Err()
