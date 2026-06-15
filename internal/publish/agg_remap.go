@@ -11,6 +11,7 @@ import (
 type aggPublishSpec struct {
 	aggCopySpec
 	grainCols  []int
+	grainNorms []grainNorm
 	sumDecCols []int
 	sumIntCols []int
 	skCols     map[int]string // column index -> dim table
@@ -30,6 +31,7 @@ func aggSpecs(month string) []aggPublishSpec {
 				colCount: 12,
 			},
 			grainCols:  []int{0, 1, 2, 3, 4, 5},
+			grainNorms: []grainNorm{grainNormDate, grainNormDate, grainNormFold, grainNormInt, grainNormInt, grainNormInt},
 			sumDecCols: []int{6, 7, 8, 9},
 			sumIntCols: []int{10},
 			skCols:     map[int]string{3: "dim_sub_account", 4: "dim_service", 5: "dim_region"},
@@ -50,6 +52,7 @@ func aggSpecs(month string) []aggPublishSpec {
 				colCount: 11,
 			},
 			grainCols:  []int{0, 1, 2, 3, 4},
+			grainNorms: []grainNorm{grainNormDate, grainNormFold, grainNormInt, grainNormFold, grainNormInt},
 			sumDecCols: []int{5, 6, 7, 8},
 			sumIntCols: []int{9},
 			skCols:     map[int]string{2: "dim_sub_account"},
@@ -68,6 +71,7 @@ func aggSpecs(month string) []aggPublishSpec {
 				colCount:   8,
 			},
 			grainCols:  []int{0, 1, 2, 3},
+			grainNorms: []grainNorm{grainNormDate, grainNormFold, grainNormTagKey, grainNormTagValue},
 			sumDecCols: []int{4, 5},
 			sumIntCols: []int{6},
 			colKinds: []aggColKind{
@@ -84,6 +88,7 @@ func aggSpecs(month string) []aggPublishSpec {
 				colCount:   8,
 			},
 			grainCols:  []int{0, 1, 2, 3},
+			grainNorms: []grainNorm{grainNormDate, grainNormFold, grainNormInt, grainNormFold},
 			sumDecCols: []int{4, 5},
 			sumIntCols: []int{6},
 			skCols:     map[int]string{2: "dim_commitment_discount"},
@@ -101,6 +106,7 @@ func aggSpecs(month string) []aggPublishSpec {
 				colCount:   7,
 			},
 			grainCols:  []int{0, 1, 2},
+			grainNorms: []grainNorm{grainNormDate, grainNormFold, grainNormInt},
 			sumDecCols: []int{3, 4},
 			sumIntCols: []int{5},
 			skCols:     map[int]string{2: "dim_service"},
@@ -118,6 +124,7 @@ func aggSpecs(month string) []aggPublishSpec {
 				colCount:   8,
 			},
 			grainCols:  []int{0, 1, 2, 3},
+			grainNorms: []grainNorm{grainNormDate, grainNormFold, grainNormInt, grainNormFold},
 			sumDecCols: []int{4, 5},
 			sumIntCols: []int{6},
 			skCols:     map[int]string{2: "dim_application"},
@@ -135,6 +142,7 @@ func aggSpecs(month string) []aggPublishSpec {
 				colCount:   9,
 			},
 			grainCols:  []int{0, 1, 2, 3, 4},
+			grainNorms: []grainNorm{grainNormDate, grainNormFold, grainNormInt, grainNormFold, grainNormInt},
 			sumDecCols: []int{5, 6},
 			sumIntCols: []int{7},
 			skCols:     map[int]string{2: "dim_application", 4: "dim_service"},
@@ -152,6 +160,7 @@ func aggSpecs(month string) []aggPublishSpec {
 				localCols:  `month_start, provider, application_sk, environment, service_sk, resource_sk, billed_cost, effective_cost, line_count, refreshed_utc`,
 			},
 			grainCols:  []int{0, 1, 2, 3, 4, 5},
+			grainNorms: []grainNorm{grainNormDate, grainNormFold, grainNormInt, grainNormFold, grainNormInt, grainNormInt},
 			sumDecCols: []int{6, 7},
 			sumIntCols: []int{8},
 			skCols:     map[int]string{2: "dim_application", 4: "dim_service", 5: "dim_resource"},
@@ -170,7 +179,8 @@ func aggSpecs(month string) []aggPublishSpec {
 				localCols: `month_start, provider, level_name, parent_key, entity_count, total_cost, min_cost, p50_cost, p75_cost,
 				p90_cost, p95_cost, p99_cost, max_cost, avg_cost, stddev_cost, gini, cr5, cr10, cr20, refreshed_utc`,
 			},
-			grainCols: []int{0, 1, 2, 3},
+			grainCols:  []int{0, 1, 2, 3},
+			grainNorms: []grainNorm{grainNormDate, grainNormFold, grainNormFold, grainNormFold},
 			colKinds: []aggColKind{
 				aggColString, aggColString, aggColString, aggColString,
 				aggColInt,
@@ -206,7 +216,7 @@ func copyAggTableRemapped(ctx context.Context, local *sql.DB, serverTx *sql.Tx, 
 		if len(spec.skCols) > 0 {
 			applySKRemap(vals, spec.skCols, maps)
 		}
-		key := grainKey(vals, spec.grainCols)
+		key := grainKeyWithNorm(vals, spec.grainCols, spec.grainNorms)
 		if prev, ok := merged[key]; ok {
 			mergeRows(prev, vals, spec.sumDecCols, spec.sumIntCols)
 		} else {
@@ -254,6 +264,7 @@ func copyCommitmentDailyRemapped(ctx context.Context, local *sql.DB, serverTx *s
 
 	spec := aggPublishSpec{
 		grainCols:  []int{0, 1, 2, 3},
+		grainNorms: []grainNorm{grainNormDate, grainNormFold, grainNormInt, grainNormFold},
 		sumDecCols: []int{4, 5},
 		sumIntCols: []int{6},
 		skCols:     map[int]string{2: "dim_commitment_discount"},
@@ -275,7 +286,7 @@ func copyCommitmentDailyRemapped(ctx context.Context, local *sql.DB, serverTx *s
 			return 0, err
 		}
 		applySKRemap(vals, spec.skCols, maps)
-		key := grainKey(vals, spec.grainCols)
+		key := grainKeyWithNorm(vals, spec.grainCols, spec.grainNorms)
 		if prev, ok := merged[key]; ok {
 			mergeRows(prev, vals, spec.sumDecCols, spec.sumIntCols)
 		} else {

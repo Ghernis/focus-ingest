@@ -61,11 +61,91 @@ func int64FromRemap(v interface{}) int64 {
 }
 
 func grainKey(vals []interface{}, cols []int) string {
+	return grainKeyWithNorm(vals, cols, nil)
+}
+
+type grainNorm byte
+
+const (
+	grainNormDefault grainNorm = iota
+	grainNormDate
+	grainNormFold // trim + uppercase for SQL Server CI unique keys
+	grainNormInt
+	grainNormTagKey   // VARCHAR(256)
+	grainNormTagValue // NVARCHAR(512)
+)
+
+func grainKeyWithNorm(vals []interface{}, cols []int, norms []grainNorm) string {
 	parts := make([]string, len(cols))
 	for i, c := range cols {
-		parts[i] = fmt.Sprint(vals[c])
+		norm := grainNormDefault
+		if i < len(norms) {
+			norm = norms[i]
+		}
+		parts[i] = normalizeGrainPart(vals, c, norm)
 	}
 	return strings.Join(parts, "\x1f")
+}
+
+func normalizeGrainPart(vals []interface{}, col int, norm grainNorm) string {
+	switch norm {
+	case grainNormDate:
+		s := normalizeDateKey(vals[col])
+		vals[col] = s
+		return s
+	case grainNormFold:
+		raw := strings.TrimSpace(fmt.Sprint(vals[col]))
+		vals[col] = raw
+		return strings.ToUpper(raw)
+	case grainNormTagKey:
+		raw := truncateRunes(strings.TrimSpace(fmt.Sprint(vals[col])), 256)
+		vals[col] = raw
+		return strings.ToUpper(raw)
+	case grainNormTagValue:
+		raw := truncateRunes(strings.TrimSpace(fmt.Sprint(vals[col])), 512)
+		vals[col] = raw
+		return strings.ToUpper(raw)
+	case grainNormInt:
+		n, ok := int64From(vals[col])
+		if !ok {
+			return ""
+		}
+		vals[col] = n
+		return strconv.FormatInt(n, 10)
+	default:
+		if n, ok := int64From(vals[col]); ok {
+			vals[col] = n
+			return strconv.FormatInt(n, 10)
+		}
+		s := strings.TrimSpace(fmt.Sprint(vals[col]))
+		if s == "<nil>" {
+			s = ""
+		}
+		vals[col] = s
+		return s
+	}
+}
+
+func normalizeDateKey(v interface{}) string {
+	s := strings.TrimSpace(fmt.Sprint(v))
+	if s == "<nil>" {
+		return ""
+	}
+	if len(s) >= 10 && s[4] == '-' && s[7] == '-' {
+		return s[:10]
+	}
+	return s
+}
+
+func truncateRunes(s string, max int) string {
+	if max <= 0 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) > max {
+		return string(r[:max])
+	}
+	return s
 }
 
 func sumFloat64(a, b interface{}) float64 {
