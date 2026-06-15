@@ -20,7 +20,18 @@ var factSKCols = map[int]string{
 }
 
 var publishFactGrainCols = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 13, 14, 15, 16, 29, 30}
-var factSumCols = []int{17, 18, 19, 20, 21, 22, 23}
+var factSumDecCols = []int{17, 18, 19, 20, 21, 22, 23}
+var factSumIntCols = []int{24}
+
+var factColKinds = []aggColKind{
+	aggColString,
+	aggColInt, aggColIntNull, aggColIntNull, aggColInt, aggColIntNull, aggColIntNull,
+	aggColInt, aggColInt, aggColInt, aggColIntNull, aggColString,
+	aggColIntNull, aggColString, aggColString, aggColString, aggColString,
+	aggColDecimal, aggColDecimal, aggColDecimal, aggColDecimal, aggColDecimal, aggColDecimal, aggColDecimal,
+	aggColInt, aggColString, aggColString,
+	aggColInt, aggColString, aggColString,
+}
 
 func publishFacts(ctx context.Context, local, server *sql.DB, month string, batchID int64, maps skMaps) (int, error) {
 	tx, err := server.BeginTx(ctx, nil)
@@ -64,8 +75,7 @@ func publishFacts(ctx context.Context, local, server *sql.DB, month string, batc
 		vals[28] = batchID
 		key := grainKey(vals, publishFactGrainCols)
 		if prev, ok := merged[key]; ok {
-			mergeRows(prev, vals, factSumCols, false)
-			prev[24] = sumIntVals(prev[24], vals[24]) // line_count
+			mergeRows(prev, vals, factSumDecCols, factSumIntCols)
 		} else {
 			merged[key] = append([]interface{}(nil), vals...)
 		}
@@ -78,6 +88,7 @@ func publishFacts(ctx context.Context, local, server *sql.DB, month string, batc
 	var batch [][]interface{}
 	total := 0
 	for _, vals := range merged {
+		coerceAggVals(vals, factColKinds)
 		batch = append(batch, vals)
 		if len(batch) >= 100 {
 			if err := store.ExecSQLServerMultiInsert(ctx, tx, prefix, colCount, batch); err != nil {

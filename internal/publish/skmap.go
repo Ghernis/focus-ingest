@@ -2,6 +2,7 @@ package publish
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -13,15 +14,8 @@ func (m skMaps) remap(dim string, sk interface{}) interface{} {
 	if sk == nil {
 		return nil
 	}
-	var v int64
-	switch t := sk.(type) {
-	case int64:
-		v = t
-	case int:
-		v = int64(t)
-	case float64:
-		v = int64(t)
-	default:
+	v, ok := int64From(sk)
+	if !ok {
 		return sk
 	}
 	if v == 0 {
@@ -35,21 +29,35 @@ func (m skMaps) remap(dim string, sk interface{}) interface{} {
 	return sk
 }
 
+func int64From(v interface{}) (int64, bool) {
+	switch t := v.(type) {
+	case int64:
+		return t, true
+	case int:
+		return int64(t), true
+	case float64:
+		return int64(t), true
+	case string:
+		if t == "" {
+			return 0, true
+		}
+		n, err := strconv.ParseInt(t, 10, 64)
+		return n, err == nil
+	default:
+		n, err := strconv.ParseInt(fmt.Sprint(v), 10, 64)
+		return n, err == nil
+	}
+}
+
 func int64FromRemap(v interface{}) int64 {
 	if v == nil {
 		return -1
 	}
-	switch t := v.(type) {
-	case int64:
-		return t
-	case int:
-		return int64(t)
-	case float64:
-		return int64(t)
-	default:
-		n, _ := strconv.ParseInt(fmt.Sprint(v), 10, 64)
-		return n
+	n, ok := int64From(v)
+	if !ok {
+		return -1
 	}
+	return n
 }
 
 func grainKey(vals []interface{}, cols []int) string {
@@ -60,24 +68,70 @@ func grainKey(vals []interface{}, cols []int) string {
 	return strings.Join(parts, "\x1f")
 }
 
-func sumDecimalStrings(a, b interface{}) string {
+func sumFloat64(a, b interface{}) float64 {
 	af, _ := strconv.ParseFloat(fmt.Sprint(a), 64)
 	bf, _ := strconv.ParseFloat(fmt.Sprint(b), 64)
-	return fmt.Sprintf("%g", af+bf)
+	return af + bf
 }
 
 func sumIntVals(a, b interface{}) int64 {
-	ai, _ := strconv.ParseInt(fmt.Sprint(a), 10, 64)
-	bi, _ := strconv.ParseInt(fmt.Sprint(b), 10, 64)
+	ai, _ := int64From(a)
+	bi, _ := int64From(b)
 	return ai + bi
 }
 
-func mergeRows(existing, incoming []interface{}, sumCols []int, sumInts bool) {
-	for _, c := range sumCols {
-		if sumInts {
-			existing[c] = sumIntVals(existing[c], incoming[c])
-		} else {
-			existing[c] = sumDecimalStrings(existing[c], incoming[c])
+func mergeRows(existing, incoming []interface{}, decCols, intCols []int) {
+	for _, c := range decCols {
+		existing[c] = sumFloat64(existing[c], incoming[c])
+	}
+	for _, c := range intCols {
+		existing[c] = sumIntVals(existing[c], incoming[c])
+	}
+}
+
+type aggColKind byte
+
+const (
+	aggColString aggColKind = iota
+	aggColInt
+	aggColIntNull
+	aggColDecimal
+)
+
+func coerceAggVals(vals []interface{}, kinds []aggColKind) {
+	for i, k := range kinds {
+		if i >= len(vals) {
+			return
+		}
+		switch k {
+		case aggColInt:
+			n, ok := int64From(vals[i])
+			if ok {
+				vals[i] = n
+			}
+		case aggColIntNull:
+			if vals[i] == nil {
+				continue
+			}
+			s := strings.TrimSpace(fmt.Sprint(vals[i]))
+			if s == "" || s == "<nil>" {
+				vals[i] = nil
+				continue
+			}
+			n, ok := int64From(vals[i])
+			if ok {
+				vals[i] = n
+			}
+		case aggColDecimal:
+			f, err := strconv.ParseFloat(fmt.Sprint(vals[i]), 64)
+			if err != nil {
+				vals[i] = 0.0
+			} else if math.IsNaN(f) || math.IsInf(f, 0) {
+				vals[i] = 0.0
+			} else {
+				vals[i] = f
+			}
 		}
 	}
 }
+
