@@ -145,15 +145,15 @@ func ensureDimTargetRow(ctx context.Context, tx *sql.Tx, maps map[string]map[int
 	case "dim_resource":
 		var provider, grid, rtype, validFrom string
 		var accSK, svcSK int64
-		var subSK sql.NullInt64
-		var region, name, owner, cc, env, app, biz, tags, hourly sql.NullString
+		var subSK, regionSK sql.NullInt64
+		var name, owner, cc, env, app, biz, tags, hourly sql.NullString
 		var excluded int
 		if err := tx.QueryRowContext(ctx, `
 			SELECT provider, global_resource_id, resource_type, account_sk, sub_account_sk, service_sk,
-			  region, name, owner_email, cost_center, environment, application, business, tags_json, hourly_cost, valid_from, is_excluded
+			  region_sk, name, owner_email, cost_center, environment, application, business, tags_json, hourly_cost, valid_from, is_excluded
 			FROM dim_resource WHERE resource_sk = ?`, oldSK).Scan(
 			&provider, &grid, &rtype, &accSK, &subSK, &svcSK,
-			&region, &name, &owner, &cc, &env, &app, &biz, &tags, &hourly, &validFrom, &excluded); err != nil {
+			&regionSK, &name, &owner, &cc, &env, &app, &biz, &tags, &hourly, &validFrom, &excluded); err != nil {
 			return err
 		}
 		accSK = remapSK(maps, "dim_account", accSK)
@@ -161,12 +161,15 @@ func ensureDimTargetRow(ctx context.Context, tx *sql.Tx, maps map[string]map[int
 		if subSK.Valid {
 			subSK.Int64 = remapSK(maps, "dim_sub_account", subSK.Int64)
 		}
+		if regionSK.Valid {
+			regionSK.Int64 = remapSK(maps, "dim_region", regionSK.Int64)
+		}
 		_, err = tx.ExecContext(ctx, `
 			INSERT OR IGNORE INTO dim_resource (resource_sk, provider, global_resource_id, resource_type, account_sk, sub_account_sk, service_sk,
-			  region, name, owner_email, cost_center, environment, application, business, tags_json, hourly_cost, valid_from, is_excluded)
+			  region_sk, name, owner_email, cost_center, environment, application, business, tags_json, hourly_cost, valid_from, is_excluded)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			newSK, provider, grid, rtype, accSK, nullIfaceInt(subSK), svcSK,
-			nullIface(region), nullIface(name), nullIface(owner), nullIface(cc), nullIface(env), nullIface(app), nullIface(biz),
+			nullIfaceInt(regionSK), nullIface(name), nullIface(owner), nullIface(cc), nullIface(env), nullIface(app), nullIface(biz),
 			nullIface(tags), nullIface(hourly), validFrom, excluded)
 		return err
 

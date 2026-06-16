@@ -429,10 +429,10 @@ func (p *Processor) upsertResource(ctx context.Context, tx *sql.Tx, r normRow, c
 	}
 	if _, err := tx.ExecContext(ctx, p.q(`
 		INSERT INTO dim_resource (provider, global_resource_id, resource_type, account_sk, sub_account_sk, service_sk,
-		  region, name, application, environment, business, cost_center,owner_email, tags_json, valid_from)
+		  region_sk, name, application, environment, business, cost_center,owner_email, tags_json, valid_from)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		r.ProviderCode, focus.PtrStr(r.ResourceId), rtype, accSK, subSK, svcSK,
-		nullStr(r.RegionId), nullStr(r.ResourceName),
+		regionSKForRow(cache, r), nullStr(r.ResourceName),
 		tagFromJSON(r.RawTagsJSON, "Application"), tagFromJSON(r.RawTagsJSON, "Environment"),
 		tagFromJSON(r.RawTagsJSON, "Business"), tagFromJSON(r.RawTagsJSON, "CostCenter"),
 		tagFromJSON(r.RawTagsJSON, "info:support-team-email"),
@@ -450,6 +450,16 @@ func (p *Processor) upsertResource(ctx context.Context, tx *sql.Tx, r normRow, c
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+func regionSKForRow(cache *dimCache, r normRow) interface{} {
+	if r.RegionId == nil || strings.TrimSpace(*r.RegionId) == "" {
+		return nil
+	}
+	if sk := cache.region[r.ProviderCode+"|"+focus.PtrStr(r.RegionId)]; sk != 0 {
+		return sk
 	}
 	return nil
 }

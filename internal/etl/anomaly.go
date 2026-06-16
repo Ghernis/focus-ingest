@@ -145,6 +145,9 @@ func stdDevPopulation(values []float64, mean float64) float64 {
 }
 
 func (p *Processor) rebuildCostAnomaliesForMonth(ctx context.Context, tx *sql.Tx, month string) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM agg_cost_anomaly_monthly WHERE `+monthEq("month_start", month)); err != nil {
+		return fmt.Errorf("delete anomalies: %w", err)
+	}
 	if err := p.rebuildAppAnomalies(ctx, tx, month); err != nil {
 		return err
 	}
@@ -152,6 +155,9 @@ func (p *Processor) rebuildCostAnomaliesForMonth(ctx context.Context, tx *sql.Tx
 }
 
 func (p *Processor) rebuildCostAnomalies(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM agg_cost_anomaly_monthly`); err != nil {
+		return fmt.Errorf("delete anomalies: %w", err)
+	}
 	if err := p.rebuildAppAnomalies(ctx, tx, ""); err != nil {
 		return err
 	}

@@ -307,12 +307,12 @@ func copyDimCapacity(ctx context.Context, src, dst *sql.DB) error {
 func copyDimResource(ctx context.Context, src, dst *sql.DB) error {
 	return copyQuery(ctx, src, dst,
 		`SELECT resource_sk, provider, global_resource_id, resource_type, account_sk, sub_account_sk, service_sk,
-		  region, name, owner_email, cost_center, environment, application, business, tags_json, hourly_cost,
+		  region_sk, name, owner_email, cost_center, environment, application, business, tags_json, hourly_cost,
 		  CONVERT(VARCHAR(10), valid_from, 23), CONVERT(VARCHAR(10), valid_to, 23),
 		  CASE WHEN is_excluded = 1 THEN 1 ELSE 0 END
 		  FROM dim_resource WHERE valid_to IS NULL`,
 		`INSERT OR REPLACE INTO dim_resource (resource_sk, provider, global_resource_id, resource_type, account_sk, sub_account_sk, service_sk,
-		  region, name, owner_email, cost_center, environment, application, business, tags_json, hourly_cost,
+		  region_sk, name, owner_email, cost_center, environment, application, business, tags_json, hourly_cost,
 		  valid_from, valid_to, is_excluded) VALUES `,
 		19, func(r *sql.Rows) ([]interface{}, error) { return scanN(r, 19) })
 }

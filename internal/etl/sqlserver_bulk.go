@@ -115,7 +115,7 @@ type resourceStagingRow struct {
 	accountSK  int64
 	subSK      interface{}
 	serviceSK  int64
-	region     interface{}
+	regionSK     interface{}
 	name       interface{}
 	application interface{}
 	environment interface{}
@@ -154,7 +154,7 @@ func (p *Processor) upsertResourcesBulkSQLServer(ctx context.Context, tx *sql.Tx
 			accountSK:   accSK,
 			subSK:       subSK,
 			serviceSK:   svcSK,
-			region:      nullStr(r.RegionId),
+			regionSK:    regionSKForRow(cache, r),
 			name:        nullStr(r.ResourceName),
 			application: tagFromJSON(r.RawTagsJSON, "Application"),
 			environment: tagFromJSON(r.RawTagsJSON, "Environment"),
@@ -177,7 +177,7 @@ func (p *Processor) upsertResourcesBulkSQLServer(ctx context.Context, tx *sql.Tx
 			account_sk INT NOT NULL,
 			sub_account_sk INT NULL,
 			service_sk INT NOT NULL,
-			region VARCHAR(64) NULL,
+			region_sk INT NULL,
 			name VARCHAR(256) NULL,
 			application VARCHAR(128) NULL,
 			environment VARCHAR(32) NULL,
@@ -194,7 +194,7 @@ func (p *Processor) upsertResourcesBulkSQLServer(ctx context.Context, tx *sql.Tx
 	chunk := sqlserver.ChunkRows(resCols)
 	prefix := `INSERT INTO #res_stg (
 			provider, global_resource_id, resource_type, account_sk, sub_account_sk, service_sk,
-			region, name, application, environment, business, cost_center, owner_email, tags_json, valid_from
+			region_sk, name, application, environment, business, cost_center, owner_email, tags_json, valid_from
 		) VALUES `
 	for start := 0; start < len(pending); start += chunk {
 		end := start + chunk
@@ -212,10 +212,10 @@ func (p *Processor) upsertResourcesBulkSQLServer(ctx context.Context, tx *sql.Tx
 		ON t.provider = s.provider AND t.global_resource_id = s.global_resource_id AND t.valid_to IS NULL
 		WHEN NOT MATCHED THEN INSERT (
 		  provider, global_resource_id, resource_type, account_sk, sub_account_sk, service_sk,
-		  region, name, application, environment, business, cost_center, owner_email, tags_json, valid_from
+		  region_sk, name, application, environment, business, cost_center, owner_email, tags_json, valid_from
 		) VALUES (
 		  s.provider, s.global_resource_id, s.resource_type, s.account_sk, s.sub_account_sk, s.service_sk,
-		  s.region, s.name, s.application, s.environment, s.business, s.cost_center, s.owner_email, s.tags_json, s.valid_from
+		  s.region_sk, s.name, s.application, s.environment, s.business, s.cost_center, s.owner_email, s.tags_json, s.valid_from
 		)
 		OUTPUT INSERTED.provider, INSERTED.global_resource_id, INSERTED.resource_sk`)
 	if err != nil {
@@ -253,7 +253,7 @@ func (p *Processor) insertResourceStagingChunk(ctx context.Context, tx *sql.Tx, 
 		b.WriteByte(')')
 		args = append(args,
 			r.provider, r.resourceID, r.rtype, r.accountSK, r.subSK, r.serviceSK,
-			r.region, r.name, r.application, r.environment, r.business, r.costCenter, r.ownerEmail, r.tagsJSON, r.validFrom,
+			r.regionSK, r.name, r.application, r.environment, r.business, r.costCenter, r.ownerEmail, r.tagsJSON, r.validFrom,
 		)
 	}
 	if err := sqlserver.CheckParamCount(len(args)); err != nil {

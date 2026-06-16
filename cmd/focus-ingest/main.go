@@ -36,6 +36,7 @@ var (
 	processETLBatchIDs []int64
 	syncFresh          bool
 	billingPeriod      string
+	allBillingPeriods  bool
 	publishFacts       bool
 )
 
@@ -159,8 +160,8 @@ func publishCmd() *cobra.Command {
 		Use:   "publish",
 		Short: "Publish local SQLite aggregates and dimensions to SQL Server",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if billingPeriod == "" {
-				return fmt.Errorf("--billing-period is required (YYYY-MM-DD)")
+			if billingPeriod == "" && !allBillingPeriods {
+				return fmt.Errorf("--billing-period is required (YYYY-MM-DD) unless --all-billing-periods is set")
 			}
 			conn := connection
 			if conn == "" {
@@ -175,15 +176,17 @@ func publishCmd() *cobra.Command {
 				ctx = context.Background()
 			}
 			return publish.Publish(ctx, publish.Options{
-				Connection:    conn,
-				SQLitePath:    cfg.SQLitePath,
-				BillingPeriod: billingPeriod,
-				PublishFacts:  publishFacts,
+				Connection:        conn,
+				SQLitePath:        cfg.SQLitePath,
+				BillingPeriod:     billingPeriod,
+				AllBillingPeriods: allBillingPeriods,
+				PublishFacts:      publishFacts,
 			})
 		},
 	}
-	cmd.Flags().StringVar(&billingPeriod, "billing-period", "", "Billing period start date to publish (YYYY-MM-DD)")
-	cmd.Flags().BoolVar(&publishFacts, "facts", false, "Also publish fact_focus_cost_daily and tag bridge for this month")
+	cmd.Flags().StringVar(&billingPeriod, "billing-period", "", "Billing period start date to publish (YYYY-MM-DD); optional with --all-billing-periods")
+	cmd.Flags().BoolVar(&allBillingPeriods, "all-billing-periods", false, "Publish every distinct billing_period_start found in the local database")
+	cmd.Flags().BoolVar(&publishFacts, "facts", false, "Also publish fact_focus_cost_daily and tag bridge for each published period")
 	return cmd
 }
 

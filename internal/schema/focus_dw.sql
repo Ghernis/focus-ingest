@@ -165,7 +165,7 @@ BEGIN
     account_sk           INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_account(account_sk),
     sub_account_sk       INT NULL FOREIGN KEY REFERENCES dbo.dim_sub_account(sub_account_sk),
     service_sk           INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_service(service_sk),
-    region               VARCHAR(64)  NULL,
+    region_sk          INT NULL FOREIGN KEY REFERENCES dbo.dim_region(region_sk),
     name                 VARCHAR(256) NULL,
     owner_email          VARCHAR(320) NULL,
     cost_center          VARCHAR(64)  NULL,
@@ -196,6 +196,27 @@ BEGIN
   CREATE INDEX IX_dim_resource_sub_account_current
     ON dbo.dim_resource (sub_account_sk)
     WHERE valid_to IS NULL;
+END
+GO
+
+IF COL_LENGTH('dbo.dim_resource', 'region_sk') IS NULL
+BEGIN
+  ALTER TABLE dbo.dim_resource ADD region_sk INT NULL;
+  IF COL_LENGTH('dbo.dim_resource', 'region') IS NOT NULL
+  BEGIN
+    UPDATE r SET region_sk = reg.region_sk
+    FROM dbo.dim_resource r
+    INNER JOIN dbo.dim_region reg ON reg.provider = r.provider AND reg.region_id = r.region
+    WHERE r.region IS NOT NULL AND LTRIM(RTRIM(r.region)) <> '';
+  END
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'FK_dim_resource_region')
+   AND COL_LENGTH('dbo.dim_resource', 'region_sk') IS NOT NULL
+BEGIN
+  ALTER TABLE dbo.dim_resource ADD CONSTRAINT FK_dim_resource_region
+    FOREIGN KEY (region_sk) REFERENCES dbo.dim_region(region_sk);
 END
 GO
 

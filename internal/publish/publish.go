@@ -2,18 +2,22 @@ package publish
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/ghernis/focus_dt/internal/etl"
 )
 
 // Options controls publish from local SQLite to SQL Server.
 type Options struct {
-	Connection    string
-	SQLitePath    string
-	BillingPeriod string // YYYY-MM-DD
-	PublishFacts  bool
-	SourceFile    string // optional; defaults to sqlite basename
+	Connection         string
+	SQLitePath         string
+	BillingPeriod      string // YYYY-MM-DD; optional when AllBillingPeriods is true
+	AllBillingPeriods  bool
+	PublishFacts       bool
+	SourceFile         string // optional; defaults to sqlite basename
 }
 
 // Publish uploads new dimensions, month aggregates, and optionally facts to SQL Server.
@@ -25,8 +29,8 @@ func Publish(ctx context.Context, opts Options) error {
 		return fmt.Errorf("sqlite path required")
 	}
 	month := strings.TrimSpace(opts.BillingPeriod)
-	if month == "" {
-		return fmt.Errorf("billing-period is required (YYYY-MM-DD)")
+	if month == "" && !opts.AllBillingPeriods {
+		return fmt.Errorf("billing-period is required (YYYY-MM-DD) unless --all-billing-periods is set")
 	}
 	if opts.SourceFile == "" {
 		opts.SourceFile = "publish:" + filepath.Base(opts.SQLitePath)
@@ -52,6 +56,14 @@ func Publish(ctx context.Context, opts Options) error {
 		return fmt.Errorf("local database is not seeded — run sync-dims --connection <azure> --sqlite-path <db> --fresh (or schema apply --local) before publish")
 	}
 
+	months, err := resolvePublishMonths(ctx, local, month, opts.AllBillingPeriods)
+	if err != nil {
+		return err
+	}
+	if len(months) == 0 {
+		return fmt.Errorf("no billing periods found in local database")
+	}
+
 	fmt.Println("Publishing pending dimensions to SQL Server...")
 	skMap, err := publishPendingDims(ctx, local, server)
 	if err != nil {
@@ -61,28 +73,35 @@ func Publish(ctx context.Context, opts Options) error {
 		fmt.Printf("  %d local SK(s) differ from server — remapping at publish time (no local DB rewrite)\n", n)
 	}
 
-	fmt.Printf("Publishing aggregates for %s...\n", month)
-	if err := publishAggregates(ctx, local, server, month, skMap); err != nil {
-		return fmt.Errorf("aggregates: %w", err)
+	for _, m := range months {
+		fmt.Printf("Publishing aggregates for %s...\n", m)
+		if err := publishAggregates(ctx, local, server, m, skMap); err != nil {
+			return fmt.Errorf("aggregates %s: %w", m, err)
+		}
+
+		if opts.PublishFacts {
+			batchID, err := ensurePublishBatch(ctx, server, m, opts.SourceFile)
+			if err != nil {
+				return fmt.Errorf("batch %s: %w", m, err)
+			}
+			fmt.Printf("Publishing facts for %s (batch %d)...\n", m, batchID)
+			n, err := publishFacts(ctx, local, server, m, batchID, skMap)
+			if err != nil {
+				return fmt.Errorf("facts %s: %w", m, err)
+			}
+			fmt.Printf("  published %d fact rows\n", n)
+
+			nb, err := publishBridge(ctx, local, server, m, skMap)
+			if err != nil {
+				return fmt.Errorf("bridge %s: %w", m, err)
+			}
+			fmt.Printf("  published %d bridge tag rows\n", nb)
+		}
 	}
 
-	if opts.PublishFacts {
-		batchID, err := ensurePublishBatch(ctx, server, month, opts.SourceFile)
-		if err != nil {
-			return fmt.Errorf("batch: %w", err)
-		}
-		fmt.Printf("Publishing facts for %s (batch %d)...\n", month, batchID)
-		n, err := publishFacts(ctx, local, server, month, batchID, skMap)
-		if err != nil {
-			return fmt.Errorf("facts: %w", err)
-		}
-		fmt.Printf("  published %d fact rows\n", n)
-
-		nb, err := publishBridge(ctx, local, server, month, skMap)
-		if err != nil {
-			return fmt.Errorf("bridge: %w", err)
-		}
-		fmt.Printf("  published %d bridge tag rows\n", nb)
+	fmt.Println("Rebuilding cost anomalies on SQL Server...")
+	if err := rebuildServerAnomalies(ctx, server, months); err != nil {
+		return fmt.Errorf("anomalies: %w", err)
 	}
 
 	if _, err := local.ExecContext(ctx, `DELETE FROM dim_sync_pending`); err != nil {
@@ -90,6 +109,31 @@ func Publish(ctx context.Context, opts Options) error {
 	}
 
 	fmt.Println("Publish complete.")
+	return nil
+}
+
+func resolvePublishMonths(ctx context.Context, local *sql.DB, single string, all bool) ([]string, error) {
+	if !all {
+		return []string{single}, nil
+	}
+	return distinctBillingMonths(ctx, local)
+}
+
+func rebuildServerAnomalies(ctx context.Context, server *sql.DB, months []string) error {
+	proc := &etl.Processor{DB: server, Dialect: "sqlserver"}
+	for _, m := range months {
+		tx, err := server.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		if err := proc.RebuildCostAnomaliesForMonth(ctx, tx, m); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("%s: %w", m, err)
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

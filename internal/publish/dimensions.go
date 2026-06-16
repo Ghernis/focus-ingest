@@ -55,32 +55,6 @@ func loadPendingDims(ctx context.Context, local *sql.DB) ([]pendingDim, error) {
 	return out, rows.Err()
 }
 
-// publishPendingDims MERGEs new/changed dimensions to SQL Server. Returns local->server SK remaps where SKs differ.
-func publishPendingDims(ctx context.Context, local, server *sql.DB) (map[string]map[int64]int64, error) {
-	pending, err := loadPendingDims(ctx, local)
-	if err != nil {
-		return nil, err
-	}
-	realign := map[string]map[int64]int64{}
-	total := len(pending)
-	for i, p := range pending {
-		serverSK, err := mergePendingDim(ctx, local, server, p, realign)
-		if err != nil {
-			return nil, fmt.Errorf("%s %s: %w", p.Table, p.NaturalKey, err)
-		}
-		if serverSK != 0 && serverSK != p.LocalSK {
-			if realign[p.Table] == nil {
-				realign[p.Table] = map[int64]int64{}
-			}
-			realign[p.Table][p.LocalSK] = serverSK
-		}
-		if (i+1)%500 == 0 || i+1 == total {
-			fmt.Printf("  dimensions: %d / %d\n", i+1, total)
-		}
-	}
-	return realign, nil
-}
-
 func mergePendingDim(ctx context.Context, local, server *sql.DB, p pendingDim, realign map[string]map[int64]int64) (int64, error) {
 	switch p.Table {
 	case "dim_account":
@@ -286,15 +260,15 @@ func mergeResource(ctx context.Context, local, server *sql.DB, p pendingDim, rea
 	parts := strings.SplitN(p.NaturalKey, "|", 2)
 	var rtype string
 	var accSK, svcSK int64
-	var subSK sql.NullInt64
-	var region, name, owner, cc, env, app, biz, tags, hourly sql.NullString
+	var subSK, regionSK sql.NullInt64
+	var name, owner, cc, env, app, biz, tags, hourly sql.NullString
 	var validFrom string
 	var excluded int
 	err := local.QueryRowContext(ctx, `
-		SELECT resource_type, account_sk, sub_account_sk, service_sk, region, name, owner_email, cost_center,
+		SELECT resource_type, account_sk, sub_account_sk, service_sk, region_sk, name, owner_email, cost_center,
 		  environment, application, business, tags_json, hourly_cost, valid_from, is_excluded
 		FROM dim_resource WHERE resource_sk = ?`, p.LocalSK).Scan(
-		&rtype, &accSK, &subSK, &svcSK, &region, &name, &owner, &cc, &env, &app, &biz, &tags, &hourly, &validFrom, &excluded)
+		&rtype, &accSK, &subSK, &svcSK, &regionSK, &name, &owner, &cc, &env, &app, &biz, &tags, &hourly, &validFrom, &excluded)
 	if err != nil {
 		return 0, err
 	}
@@ -303,13 +277,16 @@ func mergeResource(ctx context.Context, local, server *sql.DB, p pendingDim, rea
 	if subSK.Valid {
 		subSK.Int64 = remapSK(realign, "dim_sub_account", subSK.Int64)
 	}
+	if regionSK.Valid {
+		regionSK.Int64 = remapSK(realign, "dim_region", regionSK.Int64)
+	}
 	_, err = server.ExecContext(ctx, `
 		IF NOT EXISTS (SELECT 1 FROM dim_resource WHERE provider = @p1 AND global_resource_id = @p2 AND valid_to IS NULL)
 		INSERT INTO dim_resource (provider, global_resource_id, resource_type, account_sk, sub_account_sk, service_sk,
-		  region, name, owner_email, cost_center, environment, application, business, tags_json, hourly_cost, valid_from, is_excluded)
+		  region_sk, name, owner_email, cost_center, environment, application, business, tags_json, hourly_cost, valid_from, is_excluded)
 		VALUES (@p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11, @p12, @p13, @p14, @p15, @p16, @p17)`,
 		parts[0], parts[1], rtype, accSK, nullIfaceInt(subSK), svcSK,
-		nullIface(region), nullIface(name), nullIface(owner), nullIface(cc), nullIface(env), nullIface(app), nullIface(biz),
+		nullIfaceInt(regionSK), nullIface(name), nullIface(owner), nullIface(cc), nullIface(env), nullIface(app), nullIface(biz),
 		nullIface(tags), nullIface(hourly), validFrom, excluded)
 	if err != nil {
 		return 0, err

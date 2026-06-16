@@ -42,9 +42,5 @@ func publishAggregates(ctx context.Context, local, server *sql.DB, month string,
 	}
 	fmt.Printf("  published %d rows to agg_commitment_utilization_daily\n", commitDailyN)
 
-	if err := proc.RebuildCostAnomaliesForMonth(ctx, tx, month); err != nil {
-		return fmt.Errorf("anomaly rebuild: %w", err)
-	}
-
 	return tx.Commit()
 }

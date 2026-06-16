@@ -113,7 +113,7 @@ CREATE TABLE IF NOT EXISTS dim_resource (
   account_sk         INTEGER NOT NULL REFERENCES dim_account(account_sk),
   sub_account_sk     INTEGER NULL REFERENCES dim_sub_account(sub_account_sk),
   service_sk         INTEGER NOT NULL REFERENCES dim_service(service_sk),
-  region             TEXT NULL,
+  region_sk          INTEGER NULL REFERENCES dim_region(region_sk),
   name               TEXT NULL,
   owner_email        TEXT NULL,
   cost_center        TEXT NULL,
