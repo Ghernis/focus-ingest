@@ -1015,11 +1015,15 @@ IF OBJECT_ID(N'dbo.agg_commitment_utilization_daily', 'U') IS NOT NULL
    AND COL_LENGTH('dbo.agg_commitment_utilization_daily', 'billing_period_start') IS NULL
 BEGIN
   DECLARE @uq_commit_daily NVARCHAR(256);
+  DECLARE @sql NVARCHAR(MAX);
   SELECT @uq_commit_daily = kc.name
   FROM sys.key_constraints kc
   WHERE kc.parent_object_id = OBJECT_ID(N'dbo.agg_commitment_utilization_daily') AND kc.type = 'UQ';
   IF @uq_commit_daily IS NOT NULL
-    EXEC('ALTER TABLE dbo.agg_commitment_utilization_daily DROP CONSTRAINT ' + QUOTENAME(@uq_commit_daily));
+  BEGIN
+    SET @sql = N'ALTER TABLE dbo.agg_commitment_utilization_daily DROP CONSTRAINT ' + QUOTENAME(@uq_commit_daily);
+    EXEC (@sql);
+  END
 
   ALTER TABLE dbo.agg_commitment_utilization_daily ADD billing_period_start DATE NOT NULL
     CONSTRAINT DF_agg_commitment_daily_billing DEFAULT '1900-01-01';
