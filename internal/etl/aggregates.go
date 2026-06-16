@@ -91,14 +91,14 @@ func (p *Processor) rebuildAggregates(ctx context.Context, tx *sql.Tx, _ []strin
 	}
 
 	commitDailySQL := fmt.Sprintf(`
-		INSERT INTO agg_commitment_utilization_daily (charge_date, provider, commitment_sk, commitment_status, effective_cost, commitment_quantity, line_count, refreshed_utc)
-		SELECT f.charge_date, a.provider, f.commitment_sk, COALESCE(f.commitment_discount_status,'Unknown'),
+		INSERT INTO agg_commitment_utilization_daily (billing_period_start, charge_date, provider, commitment_sk, commitment_status, effective_cost, commitment_quantity, line_count, refreshed_utc)
+		SELECT %s, f.charge_date, a.provider, f.commitment_sk, COALESCE(f.commitment_discount_status,'Unknown'),
 		  SUM(%s), SUM(%s), SUM(f.line_count), %s
 		FROM fact_focus_cost_daily f
 		%s
 		WHERE f.commitment_sk IS NOT NULL AND f.sub_account_sk IS NOT NULL
-		GROUP BY f.charge_date, a.provider, f.commitment_sk, COALESCE(f.commitment_discount_status,'Unknown')`,
-		effective, commitQty, now, subJoin)
+		GROUP BY %s, f.charge_date, a.provider, f.commitment_sk, COALESCE(f.commitment_discount_status,'Unknown')`,
+		billingPeriod, effective, commitQty, now, subJoin, billingPeriod)
 	if _, err := tx.ExecContext(ctx, commitDailySQL); err != nil {
 		return fmt.Errorf("agg_commitment_utilization_daily: %w", err)
 	}

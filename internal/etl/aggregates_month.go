@@ -82,6 +82,7 @@ func (p *Processor) deleteAggregatesForMonth(ctx context.Context, tx *sql.Tx, mo
 		{"agg_app_service_resource_monthly", m},
 		{"agg_cost_distribution_monthly", m},
 		{"agg_cost_daily", bm},
+		{"agg_commitment_utilization_daily", bm},
 	}
 	if !skip {
 		tables = append(tables, struct {
@@ -93,14 +94,6 @@ func (p *Processor) deleteAggregatesForMonth(ctx context.Context, tx *sql.Tx, mo
 		if _, err := tx.ExecContext(ctx, "DELETE FROM "+t.table+" WHERE "+t.where); err != nil {
 			return fmt.Errorf("delete %s: %w", t.table, err)
 		}
-	}
-
-	commitDaily := fmt.Sprintf(`DELETE FROM agg_commitment_utilization_daily
-		WHERE charge_date IN (
-		  SELECT DISTINCT charge_date FROM fact_focus_cost_daily WHERE %s
-		)`, bm)
-	if _, err := tx.ExecContext(ctx, commitDaily); err != nil {
-		return fmt.Errorf("delete agg_commitment_utilization_daily: %w", err)
 	}
 	return nil
 }
@@ -178,14 +171,14 @@ func (p *Processor) insertCoreAggregatesForMonth(ctx context.Context, tx *sql.Tx
 	}
 
 	commitDailySQL := fmt.Sprintf(`
-		INSERT INTO agg_commitment_utilization_daily (charge_date, provider, commitment_sk, commitment_status, effective_cost, commitment_quantity, line_count, refreshed_utc)
-		SELECT f.charge_date, a.provider, f.commitment_sk, COALESCE(f.commitment_discount_status,'Unknown'),
+		INSERT INTO agg_commitment_utilization_daily (billing_period_start, charge_date, provider, commitment_sk, commitment_status, effective_cost, commitment_quantity, line_count, refreshed_utc)
+		SELECT %s, f.charge_date, a.provider, f.commitment_sk, COALESCE(f.commitment_discount_status,'Unknown'),
 		  SUM(%s), SUM(%s), SUM(f.line_count), %s
 		FROM fact_focus_cost_daily f
 		%s
 		WHERE f.commitment_sk IS NOT NULL AND f.sub_account_sk IS NOT NULL AND %s
-		GROUP BY f.charge_date, a.provider, f.commitment_sk, COALESCE(f.commitment_discount_status,'Unknown')`,
-		effective, commitQty, now, subJoin, monthFilter)
+		GROUP BY %s, f.charge_date, a.provider, f.commitment_sk, COALESCE(f.commitment_discount_status,'Unknown')`,
+		billingPeriod, effective, commitQty, now, subJoin, monthFilter, billingPeriod)
 	if _, err := tx.ExecContext(ctx, commitDailySQL); err != nil {
 		return fmt.Errorf("agg_commitment_utilization_daily: %w", err)
 	}

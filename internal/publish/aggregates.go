@@ -36,11 +36,5 @@ func publishAggregates(ctx context.Context, local, server *sql.DB, month string,
 		fmt.Printf("  published %d rows to %s\n", n, spec.table)
 	}
 
-	commitDailyN, err := copyCommitmentDailyRemapped(ctx, local, tx, month, maps)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("  published %d rows to agg_commitment_utilization_daily\n", commitDailyN)
-
 	return tx.Commit()
 }

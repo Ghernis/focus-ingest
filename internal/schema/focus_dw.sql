@@ -997,6 +997,7 @@ IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.agg_c
 BEGIN
   CREATE TABLE dbo.agg_commitment_utilization_daily (
     agg_commitment_daily_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+    billing_period_start    DATE NOT NULL,
     charge_date             DATE NOT NULL,
     provider                VARCHAR(10) NOT NULL,
     commitment_sk           INT NOT NULL,
@@ -1005,8 +1006,27 @@ BEGIN
     commitment_quantity     DECIMAL(28,10) NOT NULL DEFAULT 0,
     line_count              INT NOT NULL DEFAULT 0,
     refreshed_utc           DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
-    UNIQUE (charge_date, provider, commitment_sk, commitment_status)
+    UNIQUE (billing_period_start, charge_date, provider, commitment_sk, commitment_status)
   );
+END
+GO
+
+IF OBJECT_ID(N'dbo.agg_commitment_utilization_daily', 'U') IS NOT NULL
+   AND COL_LENGTH('dbo.agg_commitment_utilization_daily', 'billing_period_start') IS NULL
+BEGIN
+  DECLARE @uq_commit_daily NVARCHAR(256);
+  SELECT @uq_commit_daily = kc.name
+  FROM sys.key_constraints kc
+  WHERE kc.parent_object_id = OBJECT_ID(N'dbo.agg_commitment_utilization_daily') AND kc.type = 'UQ';
+  IF @uq_commit_daily IS NOT NULL
+    EXEC('ALTER TABLE dbo.agg_commitment_utilization_daily DROP CONSTRAINT ' + QUOTENAME(@uq_commit_daily));
+
+  ALTER TABLE dbo.agg_commitment_utilization_daily ADD billing_period_start DATE NOT NULL
+    CONSTRAINT DF_agg_commitment_daily_billing DEFAULT '1900-01-01';
+  ALTER TABLE dbo.agg_commitment_utilization_daily DROP CONSTRAINT DF_agg_commitment_daily_billing;
+
+  ALTER TABLE dbo.agg_commitment_utilization_daily ADD CONSTRAINT UQ_agg_commitment_utilization_daily_grain
+    UNIQUE (billing_period_start, charge_date, provider, commitment_sk, commitment_status);
 END
 GO
 

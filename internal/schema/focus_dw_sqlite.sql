@@ -573,6 +573,7 @@ CREATE TABLE IF NOT EXISTS agg_commitment_utilization (
 
 CREATE TABLE IF NOT EXISTS agg_commitment_utilization_daily (
   agg_commitment_daily_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  billing_period_start    TEXT NOT NULL,
   charge_date             TEXT NOT NULL,
   provider                TEXT NOT NULL,
   commitment_sk           INTEGER NOT NULL,
@@ -581,7 +582,7 @@ CREATE TABLE IF NOT EXISTS agg_commitment_utilization_daily (
   commitment_quantity     TEXT NOT NULL DEFAULT '0',
   line_count              INTEGER NOT NULL DEFAULT 0,
   refreshed_utc           TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (charge_date, provider, commitment_sk, commitment_status)
+  UNIQUE (billing_period_start, charge_date, provider, commitment_sk, commitment_status)
 );
 
 CREATE TABLE IF NOT EXISTS agg_savings_summary (

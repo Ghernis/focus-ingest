@@ -44,6 +44,24 @@ func aggSpecs(month string) []aggPublishSpec {
 		},
 		{
 			aggCopySpec: aggCopySpec{
+				table:      "agg_commitment_utilization_daily",
+				localWhere: fmt.Sprintf(`billing_period_start = '%s'`, m),
+				serverCols: `billing_period_start, charge_date, provider, commitment_sk, commitment_status, effective_cost, commitment_quantity, line_count, refreshed_utc`,
+				localCols:  `billing_period_start, charge_date, provider, commitment_sk, commitment_status, effective_cost, commitment_quantity, line_count, refreshed_utc`,
+				colCount:   9,
+			},
+			grainCols:  []int{0, 1, 2, 3, 4},
+			grainNorms: []grainNorm{grainNormDate, grainNormDate, grainNormFold, grainNormInt, grainNormFold},
+			sumDecCols: []int{5, 6},
+			sumIntCols: []int{7},
+			skCols:     map[int]string{3: "dim_commitment_discount"},
+			colKinds: []aggColKind{
+				aggColString, aggColString, aggColString, aggColInt, aggColString,
+				aggColDecimal, aggColDecimal, aggColInt, aggColString,
+			},
+		},
+		{
+			aggCopySpec: aggCopySpec{
 				table: "agg_cost_monthly", localWhere: fmt.Sprintf(`month_start = '%s'`, m),
 				serverCols: `month_start, provider, sub_account_sk, service_category, charge_category_sk,
 				billed_cost, effective_cost, list_cost, contracted_cost, line_count, refreshed_utc`,
@@ -222,75 +240,6 @@ func copyAggTableRemapped(ctx context.Context, local *sql.DB, serverTx *sql.Tx, 
 		} else {
 			dup := append([]interface{}(nil), vals...)
 			merged[key] = dup
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-
-	var batch [][]interface{}
-	total := 0
-	prefix := fmt.Sprintf(`INSERT INTO %s (%s) VALUES `, spec.table, spec.serverCols)
-	for _, vals := range merged {
-		coerceAggVals(vals, spec.colKinds)
-		batch = append(batch, vals)
-		if len(batch) >= 200 {
-			if err := store.ExecSQLServerMultiInsert(ctx, serverTx, prefix, spec.colCount, batch); err != nil {
-				return total, fmt.Errorf("%s: %w", spec.table, err)
-			}
-			total += len(batch)
-			batch = batch[:0]
-		}
-	}
-	if len(batch) > 0 {
-		if err := store.ExecSQLServerMultiInsert(ctx, serverTx, prefix, spec.colCount, batch); err != nil {
-			return total, fmt.Errorf("%s: %w", spec.table, err)
-		}
-		total += len(batch)
-	}
-	return total, nil
-}
-
-func copyCommitmentDailyRemapped(ctx context.Context, local *sql.DB, serverTx *sql.Tx, month string, maps skMaps) (int, error) {
-	q := fmt.Sprintf(`
-		SELECT charge_date, provider, commitment_sk, commitment_status, effective_cost, commitment_quantity, line_count, refreshed_utc
-		FROM agg_commitment_utilization_daily
-		WHERE charge_date IN (SELECT DISTINCT charge_date FROM fact_focus_cost_daily WHERE billing_period_start = '%s')`, month)
-	rows, err := local.QueryContext(ctx, q)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-
-	spec := aggPublishSpec{
-		grainCols:  []int{0, 1, 2, 3},
-		grainNorms: []grainNorm{grainNormDate, grainNormFold, grainNormInt, grainNormFold},
-		sumDecCols: []int{4, 5},
-		sumIntCols: []int{6},
-		skCols:     map[int]string{2: "dim_commitment_discount"},
-		colKinds: []aggColKind{
-			aggColString, aggColString, aggColInt, aggColString,
-			aggColDecimal, aggColDecimal, aggColInt, aggColString,
-		},
-		aggCopySpec: aggCopySpec{
-			table:      "agg_commitment_utilization_daily",
-			serverCols: `charge_date, provider, commitment_sk, commitment_status, effective_cost, commitment_quantity, line_count, refreshed_utc`,
-			colCount:   8,
-		},
-	}
-
-	merged := map[string][]interface{}{}
-	for rows.Next() {
-		vals, err := scanN(rows, 8)
-		if err != nil {
-			return 0, err
-		}
-		applySKRemap(vals, spec.skCols, maps)
-		key := grainKeyWithNorm(vals, spec.grainCols, spec.grainNorms)
-		if prev, ok := merged[key]; ok {
-			mergeRows(prev, vals, spec.sumDecCols, spec.sumIntCols)
-		} else {
-			merged[key] = append([]interface{}(nil), vals...)
 		}
 	}
 	if err := rows.Err(); err != nil {
