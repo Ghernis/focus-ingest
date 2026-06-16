@@ -207,3 +207,11 @@ On SQL Server you can stop publishing `--facts` for June once July is live if yo
 5. **`billing-period` must match** `billing_period_start` in the data (e.g. `2026-06-01`, not `2026-06-15`).
 
 If you want, we can add a small PowerShell helper script that classifies partitions (new vs needs `--force` by last write time) and runs the right import command automatically.
+
+# all billings not final
+
+`.\focus-ingest.exe publish --connection $conn --sqlite-path $db --all-billing-periods`
+
+# all billings final with facts
+
+`.\focus-ingest.exe publish --connection $conn --sqlite-path focus_2026-06.db --billing-period 2026-06-01 --facts`

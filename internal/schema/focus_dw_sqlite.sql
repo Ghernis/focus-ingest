@@ -706,7 +706,7 @@ DROP VIEW IF EXISTS vw_recommendations_summary;
 CREATE VIEW vw_recommendations_summary AS
 SELECT
   r.rec_snapshot_id, r.snapshot_month, r.recommendation_type, r.current_utilization_status,
-  r.terminate_recommendation, res.name AS resource_name, res.resource_type, res.region AS resource_region,
+  r.terminate_recommendation, res.name AS resource_name, res.resource_type, res_reg.region_id AS resource_region,
   res.owner_email, res.environment, acc.provider, sa.sub_account_name AS account_name, svc.service_name,
   r.current_instance_type, r.current_vcpu, r.current_memory_gb,
   r.recommended_instance_type, r.recommended_vcpu, r.recommended_memory_gb,
@@ -719,7 +719,8 @@ FROM fact_recommendation_snapshot_v2 r
 INNER JOIN dim_resource res ON r.resource_sk = res.resource_sk
 INNER JOIN dim_sub_account sa ON res.sub_account_sk = sa.sub_account_sk
 INNER JOIN dim_account acc ON sa.billing_account_sk = acc.account_sk
-INNER JOIN dim_service svc ON res.service_sk = svc.service_sk;
+INNER JOIN dim_service svc ON res.service_sk = svc.service_sk
+LEFT JOIN dim_region res_reg ON res.region_sk = res_reg.region_sk;
 
 DROP VIEW IF EXISTS vw_top_savings_opportunities;
 CREATE VIEW vw_top_savings_opportunities AS

@@ -199,21 +199,36 @@ BEGIN
 END
 GO
 
-IF COL_LENGTH('dbo.dim_resource', 'region_sk') IS NULL
+-- Legacy upgrade: dim_resource.region (text) -> region_sk. Fresh installs already have region_sk from CREATE above.
+IF OBJECT_ID(N'dbo.dim_resource', 'U') IS NOT NULL
+   AND COL_LENGTH('dbo.dim_resource', 'region_sk') IS NULL
 BEGIN
   ALTER TABLE dbo.dim_resource ADD region_sk INT NULL;
-  IF COL_LENGTH('dbo.dim_resource', 'region') IS NOT NULL
-  BEGIN
-    UPDATE r SET region_sk = reg.region_sk
-    FROM dbo.dim_resource r
-    INNER JOIN dbo.dim_region reg ON reg.provider = r.provider AND reg.region_id = r.region
-    WHERE r.region IS NOT NULL AND LTRIM(RTRIM(r.region)) <> '';
-  END
 END
 GO
 
-IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'FK_dim_resource_region')
+IF OBJECT_ID(N'dbo.dim_resource', 'U') IS NOT NULL
+   AND COL_LENGTH('dbo.dim_resource', 'region') IS NOT NULL
    AND COL_LENGTH('dbo.dim_resource', 'region_sk') IS NOT NULL
+BEGIN
+  EXEC(N'
+    UPDATE r SET region_sk = reg.region_sk
+    FROM dbo.dim_resource r
+    INNER JOIN dbo.dim_region reg ON reg.provider = r.provider AND reg.region_id = r.region
+    WHERE r.region IS NOT NULL AND LTRIM(RTRIM(r.region)) <> ''''
+      AND r.region_sk IS NULL');
+END
+GO
+
+IF OBJECT_ID(N'dbo.dim_resource', 'U') IS NOT NULL
+   AND COL_LENGTH('dbo.dim_resource', 'region_sk') IS NOT NULL
+   AND NOT EXISTS (
+     SELECT 1
+     FROM sys.foreign_keys fk
+     INNER JOIN sys.foreign_key_columns fkc ON fk.object_id = fkc.constraint_object_id
+     WHERE fk.parent_object_id = OBJECT_ID(N'dbo.dim_resource')
+       AND COL_NAME(fkc.parent_object_id, fkc.parent_column_id) = N'region_sk'
+   )
 BEGIN
   ALTER TABLE dbo.dim_resource ADD CONSTRAINT FK_dim_resource_region
     FOREIGN KEY (region_sk) REFERENCES dbo.dim_region(region_sk);
@@ -1344,7 +1359,7 @@ SELECT
     r.terminate_recommendation,
     res.name AS resource_name,
     res.resource_type,
-    res.region AS resource_region,
+    res_reg.region_id AS resource_region,
     res.owner_email,
     res.environment,
     acc.provider,
@@ -1376,10 +1391,11 @@ INNER JOIN dbo.dim_resource res ON r.resource_sk = res.resource_sk
 INNER JOIN dbo.dim_sub_account sa ON res.sub_account_sk = sa.sub_account_sk
 INNER JOIN dbo.dim_account acc ON sa.billing_account_sk = acc.account_sk
 INNER JOIN dbo.dim_service svc ON res.service_sk = svc.service_sk
+LEFT JOIN dbo.dim_region res_reg ON res.region_sk = res_reg.region_sk
 LEFT JOIN dbo.fact_recommendation_metrics m ON r.rec_snapshot_id = m.rec_snapshot_id
 GROUP BY
     r.rec_snapshot_id, r.snapshot_month, r.recommendation_type, r.current_utilization_status,
-    r.terminate_recommendation, res.name, res.resource_type, res.region, res.owner_email,
+    r.terminate_recommendation, res.name, res.resource_type, res_reg.region_id, res.owner_email,
     res.environment, acc.provider, sa.sub_account_name, svc.service_name,
     r.current_instance_type, r.current_vcpu, r.current_memory_gb,
     r.recommended_instance_type, r.recommended_vcpu, r.recommended_memory_gb,
