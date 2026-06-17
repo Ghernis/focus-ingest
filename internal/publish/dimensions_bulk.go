@@ -109,8 +109,21 @@ func bulkPublishTags(ctx context.Context, server *sql.DB, items []pendingDim, re
 		FROM #tag_stg s
 		WHERE NOT EXISTS (
 			SELECT 1 FROM dim_tag t WHERE t.tag_key = s.tag_key AND t.tag_value = s.tag_value
+		)
+		AND NOT EXISTS (
+			SELECT 1 FROM dim_tag t WHERE t.tag_sk = s.local_sk
 		);
-		SET IDENTITY_INSERT dim_tag OFF;`); err != nil {
+		SET IDENTITY_INSERT dim_tag OFF;
+
+		INSERT INTO dim_tag (tag_key, tag_value)
+		SELECT s.tag_key, s.tag_value
+		FROM #tag_stg s
+		WHERE NOT EXISTS (
+			SELECT 1 FROM dim_tag t WHERE t.tag_key = s.tag_key AND t.tag_value = s.tag_value
+		)
+		AND EXISTS (
+			SELECT 1 FROM dim_tag t WHERE t.tag_sk = s.local_sk
+		);`); err != nil {
 		return err
 	}
 
@@ -202,8 +215,24 @@ func bulkPublishResources(ctx context.Context, local, server *sql.DB, items []pe
 		WHERE NOT EXISTS (
 			SELECT 1 FROM dim_resource r
 			WHERE r.provider = s.provider AND r.global_resource_id = s.global_resource_id AND r.valid_to IS NULL
+		)
+		AND NOT EXISTS (
+			SELECT 1 FROM dim_resource r WHERE r.resource_sk = s.local_sk
 		);
-		SET IDENTITY_INSERT dim_resource OFF;`); err != nil {
+		SET IDENTITY_INSERT dim_resource OFF;
+
+		INSERT INTO dim_resource (provider, global_resource_id, resource_type, account_sk, sub_account_sk, service_sk,
+		  region_sk, name, owner_email, cost_center, environment, application, business, tags_json, hourly_cost, valid_from, is_excluded)
+		SELECT s.provider, s.global_resource_id, s.resource_type, s.account_sk, s.sub_account_sk, s.service_sk,
+		  s.region_sk, s.name, s.owner_email, s.cost_center, s.environment, s.application, s.business, s.tags_json, s.hourly_cost, s.valid_from, s.is_excluded
+		FROM #res_stg s
+		WHERE NOT EXISTS (
+			SELECT 1 FROM dim_resource r
+			WHERE r.provider = s.provider AND r.global_resource_id = s.global_resource_id AND r.valid_to IS NULL
+		)
+		AND EXISTS (
+			SELECT 1 FROM dim_resource r WHERE r.resource_sk = s.local_sk
+		);`); err != nil {
 		return err
 	}
 
