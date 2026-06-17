@@ -58,3 +58,15 @@ func TestMergeAliasValues(t *testing.T) {
 		t.Fatalf("legacy comma: %q", got)
 	}
 }
+
+func TestMergeAliasLists(t *testing.T) {
+	if got := MergeAliasLists("DNS Services|DNS_Services", "DNS Services|DNS_Services"); got != "DNS Services|DNS_Services" {
+		t.Fatalf("idempotent merge: %q", got)
+	}
+	if got := MergeAliasLists("DNS Services|DNS_Services", "DNS Services|DNS_Services|DNS Services|DNS_Services"); got != "DNS Services|DNS_Services" {
+		t.Fatalf("repair duplicated publish merge: %q", got)
+	}
+	if got := MergeAliasLists("INS APP1", "ins-app1|INS APP1"); got != "INS APP1|ins-app1" {
+		t.Fatalf("union merge: %q", got)
+	}
+}

@@ -322,7 +322,10 @@ func mergeApplication(ctx context.Context, local, server *sql.DB, p pendingDim) 
 	if err != nil && err != sql.ErrNoRows {
 		return 0, err
 	}
-	merged := focus.MergeAliasValues(serverAliases.String, aliases.String)
+	merged := focus.MergeAliasLists(serverAliases.String, aliases.String)
+	if err != sql.ErrNoRows && merged == focus.CanonicalAliasList(serverAliases.String) {
+		return lookupServerSK(ctx, server, `SELECT application_sk FROM dim_application WHERE application_name = @p1`, canon)
+	}
 	if err == sql.ErrNoRows {
 		_, err = server.ExecContext(ctx, `
 			INSERT INTO dim_application (application_name, alias_values, first_seen_date, created_utc, updated_utc)

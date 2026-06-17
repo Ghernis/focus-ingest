@@ -83,3 +83,25 @@ func TestClassifyAnomalyType_Normal(t *testing.T) {
 		t.Fatalf("anomaly_type=%q want NORMAL", last.anomalyType)
 	}
 }
+
+func TestAnomalyMonthMatches_SQLServerDateScan(t *testing.T) {
+	only := "2026-06-01"
+	scanned := "2026-06-01T00:00:00Z"
+	if !anomalyMonthMatches(only, scanned) {
+		t.Fatalf("expected %q to match %q", scanned, only)
+	}
+	if anomalyMonthMatches(only, "2026-07-01T00:00:00Z") {
+		t.Fatal("different months should not match")
+	}
+}
+
+func TestAnomalyMonthSelectExpr_SQLServer(t *testing.T) {
+	p := &Processor{Dialect: "sqlserver"}
+	if got := p.anomalyMonthSelectExpr(); got != "CONVERT(VARCHAR(10), month_start, 23)" {
+		t.Fatalf("sqlserver expr=%q", got)
+	}
+	p.Dialect = "sqlite"
+	if got := p.anomalyMonthSelectExpr(); got != "month_start" {
+		t.Fatalf("sqlite expr=%q", got)
+	}
+}

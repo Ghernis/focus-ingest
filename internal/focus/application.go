@@ -52,18 +52,44 @@ func ResolveApplicationName(raw string) string {
 func MergeAliasValues(existing, raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return strings.TrimSpace(existing)
+		return CanonicalAliasList(existing)
 	}
-	existing = strings.TrimSpace(existing)
-	if existing == "" {
-		return raw
+	return MergeAliasLists(existing, raw)
+}
+
+func splitAliasList(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
 	}
-	// tolerate legacy comma-separated values
-	existing = strings.ReplaceAll(existing, ",", aliasSeparator)
-	for _, part := range strings.Split(existing, aliasSeparator) {
-		if strings.EqualFold(strings.TrimSpace(part), raw) {
-			return existing
+	s = strings.ReplaceAll(s, ",", aliasSeparator)
+	var out []string
+	for _, part := range strings.Split(s, aliasSeparator) {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
 		}
+		out = append(out, part)
 	}
-	return existing + aliasSeparator + raw
+	return out
+}
+
+// CanonicalAliasList normalizes a pipe/comma-separated alias list (dedup, pipe join).
+func CanonicalAliasList(s string) string {
+	return MergeAliasLists(s, "")
+}
+
+// MergeAliasLists unions two alias lists (case-insensitive dedup; first-seen casing wins).
+func MergeAliasLists(a, b string) string {
+	var merged []string
+	seen := map[string]struct{}{}
+	for _, part := range append(splitAliasList(a), splitAliasList(b)...) {
+		key := strings.ToLower(part)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		merged = append(merged, part)
+	}
+	return strings.Join(merged, aliasSeparator)
 }

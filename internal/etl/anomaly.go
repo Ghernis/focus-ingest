@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math"
 	"sort"
+
+	"github.com/ghernis/focus_dt/internal/focus"
 )
 
 const (
@@ -144,7 +146,26 @@ func stdDevPopulation(values []float64, mean float64) float64 {
 	return math.Sqrt(sumSq / float64(len(values)))
 }
 
+func normalizeAnomalyMonth(s string) string {
+	return focus.DateOnly(s)
+}
+
+func anomalyMonthMatches(onlyMonth, month string) bool {
+	if onlyMonth == "" {
+		return true
+	}
+	return normalizeAnomalyMonth(onlyMonth) == normalizeAnomalyMonth(month)
+}
+
+func (p *Processor) anomalyMonthSelectExpr() string {
+	if p.Dialect == "sqlserver" {
+		return "CONVERT(VARCHAR(10), month_start, 23)"
+	}
+	return "month_start"
+}
+
 func (p *Processor) rebuildCostAnomaliesForMonth(ctx context.Context, tx *sql.Tx, month string) error {
+	month = normalizeAnomalyMonth(month)
 	if _, err := tx.ExecContext(ctx, `DELETE FROM agg_cost_anomaly_monthly WHERE `+monthEq("month_start", month)); err != nil {
 		return fmt.Errorf("delete anomalies: %w", err)
 	}
@@ -165,7 +186,9 @@ func (p *Processor) rebuildCostAnomalies(ctx context.Context, tx *sql.Tx) error 
 }
 
 func (p *Processor) rebuildAppAnomalies(ctx context.Context, tx *sql.Tx, onlyMonth string) error {
+	onlyMonth = normalizeAnomalyMonth(onlyMonth)
 	costCol := p.castCost("billed_cost")
+	monthCol := p.anomalyMonthSelectExpr()
 	scope := ""
 	if onlyMonth != "" {
 		scope = fmt.Sprintf(`WHERE application_sk IN (
@@ -173,11 +196,11 @@ func (p *Processor) rebuildAppAnomalies(ctx context.Context, tx *sql.Tx, onlyMon
 		)`, monthEq("month_start", onlyMonth))
 	}
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
-		SELECT month_start, provider, application_sk, SUM(%s)
+		SELECT %s AS month_start, provider, application_sk, SUM(%s)
 		FROM agg_app_monthly
 		%s
-		GROUP BY month_start, provider, application_sk
-		ORDER BY provider, application_sk, month_start`, costCol, scope))
+		GROUP BY %s, provider, application_sk
+		ORDER BY provider, application_sk, %s`, monthCol, costCol, scope, monthCol, monthCol))
 	if err != nil {
 		return fmt.Errorf("load app monthly: %w", err)
 	}
@@ -196,7 +219,7 @@ func (p *Processor) rebuildAppAnomalies(ctx context.Context, tx *sql.Tx, onlyMon
 			return err
 		}
 		k := key{provider: provider, appSK: appSK}
-		series[k] = append(series[k], monthlyCostPoint{month: month, cost: cost})
+		series[k] = append(series[k], monthlyCostPoint{month: normalizeAnomalyMonth(month), cost: cost})
 	}
 	if err := rows.Err(); err != nil {
 		return err
@@ -204,7 +227,7 @@ func (p *Processor) rebuildAppAnomalies(ctx context.Context, tx *sql.Tx, onlyMon
 
 	for k, pts := range series {
 		for _, m := range computeMonthlyAnomalies(pts) {
-			if onlyMonth != "" && m.month != onlyMonth {
+			if !anomalyMonthMatches(onlyMonth, m.month) {
 				continue
 			}
 			if err := p.insertAnomalyRow(ctx, tx, m, k.provider, "APP", k.appSK, 0); err != nil {
@@ -216,7 +239,9 @@ func (p *Processor) rebuildAppAnomalies(ctx context.Context, tx *sql.Tx, onlyMon
 }
 
 func (p *Processor) rebuildServiceAnomalies(ctx context.Context, tx *sql.Tx, onlyMonth string) error {
+	onlyMonth = normalizeAnomalyMonth(onlyMonth)
 	costCol := p.castCost("billed_cost")
+	monthCol := p.anomalyMonthSelectExpr()
 	scope := ""
 	if onlyMonth != "" {
 		scope = fmt.Sprintf(`WHERE application_sk IN (
@@ -224,11 +249,11 @@ func (p *Processor) rebuildServiceAnomalies(ctx context.Context, tx *sql.Tx, onl
 		)`, monthEq("month_start", onlyMonth))
 	}
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
-		SELECT month_start, provider, application_sk, service_sk, SUM(%s)
+		SELECT %s AS month_start, provider, application_sk, service_sk, SUM(%s)
 		FROM agg_app_service_monthly
 		%s
-		GROUP BY month_start, provider, application_sk, service_sk
-		ORDER BY provider, application_sk, service_sk, month_start`, costCol, scope))
+		GROUP BY %s, provider, application_sk, service_sk
+		ORDER BY provider, application_sk, service_sk, %s`, monthCol, costCol, scope, monthCol, monthCol))
 	if err != nil {
 		return fmt.Errorf("load app service monthly: %w", err)
 	}
@@ -248,7 +273,7 @@ func (p *Processor) rebuildServiceAnomalies(ctx context.Context, tx *sql.Tx, onl
 			return err
 		}
 		k := key{provider: provider, appSK: appSK, svcSK: svcSK}
-		series[k] = append(series[k], monthlyCostPoint{month: month, cost: cost})
+		series[k] = append(series[k], monthlyCostPoint{month: normalizeAnomalyMonth(month), cost: cost})
 	}
 	if err := rows.Err(); err != nil {
 		return err
@@ -256,7 +281,7 @@ func (p *Processor) rebuildServiceAnomalies(ctx context.Context, tx *sql.Tx, onl
 
 	for k, pts := range series {
 		for _, m := range computeMonthlyAnomalies(pts) {
-			if onlyMonth != "" && m.month != onlyMonth {
+			if !anomalyMonthMatches(onlyMonth, m.month) {
 				continue
 			}
 			if err := p.insertAnomalyRow(ctx, tx, m, k.provider, "SERVICE", k.appSK, k.svcSK); err != nil {
@@ -291,7 +316,7 @@ func (p *Processor) insertAnomalyRow(ctx context.Context, tx *sql.Tx, m anomalyM
 	}
 
 	_, err := tx.ExecContext(ctx, p.q(q),
-		m.month, provider, level, appSK, svc,
+		normalizeAnomalyMonth(m.month), provider, level, appSK, svc,
 		formatCost(m.currentCost), formatCost(m.avg3m), formatCost(m.stddev3m),
 		formatRatio(m.zScore), formatRatio(m.pctChangeVsAvg),
 		m.historyMonths, flag, m.anomalyType,
