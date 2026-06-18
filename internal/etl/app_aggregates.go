@@ -280,7 +280,7 @@ func (p *Processor) rebuildCostDistributionFiltered(ctx context.Context, tx *sql
 			month_start, provider, level_name, parent_key,
 			entity_count, total_cost, min_cost, p50_cost, p75_cost, p90_cost, p95_cost, p99_cost,
 			max_cost, avg_cost, stddev_cost, gini, cr5, cr10, cr20, top_10_cost_pct, tail_80_cost_pct, refreshed_utc
-		) VALUES (@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15,@p16,@p17,@p18,@p19,@p20,@p21,@p22,SYSUTCDATETIME())`
+		) VALUES (@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15,@p16,@p17,@p18,@p19,@p20,@p21,SYSUTCDATETIME())`
 		}
 		if _, err := tx.ExecContext(ctx, p.q(q),
 			k.month, k.provider, k.level, parent,
