@@ -297,32 +297,32 @@ ON t.pricing_category = s.pricing_category
 WHEN NOT MATCHED THEN INSERT (pricing_category) VALUES (s.pricing_category);
 GO
 
--- Populate dim_date (2020-01-01 through 2035-12-31)
-IF NOT EXISTS (SELECT 1 FROM dbo.dim_date)
-BEGIN
-  ;WITH n AS (
-    SELECT TOP (5844) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) - 1 AS n
-    FROM sys.all_objects a CROSS JOIN sys.all_objects b
-  )
-  INSERT INTO dbo.dim_date (
-    date_sk, full_date, year_num, quarter_num, month_num, month_name,
-    month_start, week_num, day_of_month, day_of_week, day_name, is_weekend
-  )
-  SELECT
-    CONVERT(INT, FORMAT(d, 'yyyyMMdd')),
-    d,
-    YEAR(d),
-    DATEPART(QUARTER, d),
-    MONTH(d),
-    DATENAME(MONTH, d),
-    DATEFROMPARTS(YEAR(d), MONTH(d), 1),
-    DATEPART(ISO_WEEK, d),
-    DAY(d),
-    DATEPART(WEEKDAY, d),
-    DATENAME(WEEKDAY, d),
-    CASE WHEN DATEPART(WEEKDAY, d) IN (1, 7) THEN 1 ELSE 0 END
-  FROM (SELECT DATEADD(DAY, n, '2020-01-01') AS d FROM n) x;
-END
+-- Populate dim_date: one row per calendar day (2020-01-01 through 2040-12-31).
+-- Idempotent backfill — inserts any missing dates even if the table already has rows.
+;WITH n AS (
+  SELECT TOP (DATEDIFF(DAY, '2020-01-01', '2040-12-31') + 1)
+    ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) - 1 AS n
+  FROM sys.all_objects a CROSS JOIN sys.all_objects b
+)
+INSERT INTO dbo.dim_date (
+  date_sk, full_date, year_num, quarter_num, month_num, month_name,
+  month_start, week_num, day_of_month, day_of_week, day_name, is_weekend
+)
+SELECT
+  CONVERT(INT, FORMAT(d, 'yyyyMMdd')),
+  d,
+  YEAR(d),
+  DATEPART(QUARTER, d),
+  MONTH(d),
+  DATENAME(MONTH, d),
+  DATEFROMPARTS(YEAR(d), MONTH(d), 1),
+  DATEPART(ISO_WEEK, d),
+  DAY(d),
+  DATEPART(WEEKDAY, d),
+  DATENAME(WEEKDAY, d),
+  CASE WHEN DATEPART(WEEKDAY, d) IN (1, 7) THEN 1 ELSE 0 END
+FROM (SELECT DATEADD(DAY, n, '2020-01-01') AS d FROM n) x
+WHERE NOT EXISTS (SELECT 1 FROM dbo.dim_date existing WHERE existing.full_date = x.d);
 GO
 
 -- =====================================================================
@@ -1581,29 +1581,57 @@ GO
 
 CREATE OR ALTER VIEW dbo.vw_pbi_cost_distribution_monthly AS
 SELECT
-    month_start,
-    provider,
-    level_name,
-    parent_key,
-    entity_count,
-    total_cost,
-    min_cost,
-    p50_cost,
-    p75_cost,
-    p90_cost,
-    p95_cost,
-    p99_cost,
-    max_cost,
-    avg_cost,
-    stddev_cost,
-    gini,
-    cr5,
-    cr10,
-    cr20,
-    top_10_cost_pct,
-    tail_80_cost_pct,
-    refreshed_utc
-FROM dbo.agg_cost_distribution_monthly;
+    d.month_start,
+    d.provider,
+    d.level_name,
+    d.parent_key,
+    CASE
+      WHEN d.level_name = 'APP' AND d.parent_key IS NULL THEN NULL
+      WHEN d.level_name IN ('APP', 'SERVICE') AND d.parent_key IS NOT NULL
+        THEN TRY_CAST(d.parent_key AS INT)
+      WHEN d.level_name = 'RESOURCE' AND CHARINDEX('|', d.parent_key) > 0
+        THEN TRY_CAST(LEFT(d.parent_key, CHARINDEX('|', d.parent_key) - 1) AS INT)
+      ELSE NULL
+    END AS application_sk,
+    CASE
+      WHEN d.level_name = 'RESOURCE' AND CHARINDEX('|', d.parent_key) > 0
+        THEN TRY_CAST(SUBSTRING(d.parent_key, CHARINDEX('|', d.parent_key) + 1, 8000) AS INT)
+      ELSE NULL
+    END AS service_sk,
+    app.application_name,
+    svc.service_name,
+    d.entity_count,
+    d.total_cost,
+    d.min_cost,
+    d.p50_cost,
+    d.p75_cost,
+    d.p90_cost,
+    d.p95_cost,
+    d.p99_cost,
+    d.max_cost,
+    d.avg_cost,
+    d.stddev_cost,
+    d.gini,
+    d.cr5,
+    d.cr10,
+    d.cr20,
+    d.top_10_cost_pct,
+    d.tail_80_cost_pct,
+    d.refreshed_utc
+FROM dbo.agg_cost_distribution_monthly d
+LEFT JOIN dbo.dim_application app ON app.application_sk = TRY_CAST(
+  CASE
+    WHEN d.level_name IN ('APP', 'SERVICE') THEN d.parent_key
+    WHEN d.level_name = 'RESOURCE' AND CHARINDEX('|', d.parent_key) > 0
+      THEN LEFT(d.parent_key, CHARINDEX('|', d.parent_key) - 1)
+    ELSE NULL
+  END AS INT)
+LEFT JOIN dbo.dim_service svc ON svc.service_sk = TRY_CAST(
+  CASE
+    WHEN d.level_name = 'RESOURCE' AND CHARINDEX('|', d.parent_key) > 0
+      THEN SUBSTRING(d.parent_key, CHARINDEX('|', d.parent_key) + 1, 8000)
+    ELSE NULL
+  END AS INT);
 GO
 
 CREATE OR ALTER VIEW dbo.vw_pbi_cost_anomaly_monthly AS

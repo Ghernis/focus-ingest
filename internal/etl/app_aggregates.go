@@ -185,6 +185,31 @@ func (p *Processor) rebuildCostDistributionFiltered(ctx context.Context, tx *sql
 	}
 	rows.Close()
 
+	// Per-application: distribution of environment-level costs within each app.
+	rows, err = tx.QueryContext(ctx, fmt.Sprintf(`
+		SELECT month_start, provider, application_sk, environment, SUM(%s)
+		FROM agg_app_monthly
+		%s
+		GROUP BY month_start, provider, application_sk, environment`, costCol, appWhere))
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var month, provider, env string
+		var appSK int64
+		var cost float64
+		if err := rows.Scan(&month, &provider, &appSK, &env, &cost); err != nil {
+			rows.Close()
+			return err
+		}
+		k := distKey{
+			month: month, provider: provider, level: "APP",
+			parent: strconv.FormatInt(appSK, 10),
+		}
+		groups[k] = append(groups[k], cost)
+	}
+	rows.Close()
+
 	rows, err = tx.QueryContext(ctx, fmt.Sprintf(`
 		SELECT month_start, provider, application_sk, service_sk, SUM(%s)
 		FROM agg_app_service_monthly

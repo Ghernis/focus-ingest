@@ -171,7 +171,7 @@ INSERT OR IGNORE INTO dim_charge_category (charge_category) VALUES ('Usage'),('P
 INSERT OR IGNORE INTO dim_charge_frequency (charge_frequency) VALUES ('Usage-Based'),('Recurring'),('One-Time');
 INSERT OR IGNORE INTO dim_pricing_category (pricing_category) VALUES ('Standard'),('Committed'),('Dynamic'),('Other');
 
--- dim_date seed 2020-01-01 .. 2035-12-31
+-- dim_date seed: one row per calendar day 2020-01-01 .. 2040-12-31 (INSERT OR IGNORE = idempotent backfill)
 INSERT OR IGNORE INTO dim_date (
   date_sk, full_date, year_num, quarter_num, month_num, month_name,
   month_start, week_num, day_of_month, day_of_week, day_name, is_weekend
@@ -179,7 +179,7 @@ INSERT OR IGNORE INTO dim_date (
 WITH RECURSIVE dates(d) AS (
   SELECT date('2020-01-01')
   UNION ALL
-  SELECT date(d, '+1 day') FROM dates WHERE d < date('2035-12-31')
+  SELECT date(d, '+1 day') FROM dates WHERE d < date('2040-12-31')
 )
 SELECT
   CAST(strftime('%Y%m%d', d) AS INTEGER),
@@ -807,10 +807,39 @@ LEFT JOIN dim_service svc ON a.service_sk = svc.service_sk;
 
 DROP VIEW IF EXISTS vw_pbi_cost_distribution_monthly;
 CREATE VIEW vw_pbi_cost_distribution_monthly AS
-SELECT month_start, month_start AS billing_period_start, provider, level_name, parent_key,
-  entity_count, total_cost, min_cost, p50_cost, p75_cost, p90_cost, p95_cost, p99_cost,
-  max_cost, avg_cost, stddev_cost, gini, cr5, cr10, cr20, top_10_cost_pct, tail_80_cost_pct, refreshed_utc
-FROM agg_cost_distribution_monthly;
+SELECT
+  d.month_start,
+  d.month_start AS billing_period_start,
+  d.provider,
+  d.level_name,
+  d.parent_key,
+  CASE
+    WHEN d.level_name IN ('APP', 'SERVICE') AND d.parent_key IS NOT NULL THEN CAST(d.parent_key AS INTEGER)
+    WHEN d.level_name = 'RESOURCE' AND instr(d.parent_key, '|') > 0
+      THEN CAST(substr(d.parent_key, 1, instr(d.parent_key, '|') - 1) AS INTEGER)
+    ELSE NULL
+  END AS application_sk,
+  CASE
+    WHEN d.level_name = 'RESOURCE' AND instr(d.parent_key, '|') > 0
+      THEN CAST(substr(d.parent_key, instr(d.parent_key, '|') + 1) AS INTEGER)
+    ELSE NULL
+  END AS service_sk,
+  app.application_name,
+  svc.service_name,
+  d.entity_count, d.total_cost, d.min_cost, d.p50_cost, d.p75_cost, d.p90_cost, d.p95_cost, d.p99_cost,
+  d.max_cost, d.avg_cost, d.stddev_cost, d.gini, d.cr5, d.cr10, d.cr20, d.top_10_cost_pct, d.tail_80_cost_pct, d.refreshed_utc
+FROM agg_cost_distribution_monthly d
+LEFT JOIN dim_application app ON app.application_sk = CASE
+  WHEN d.level_name IN ('APP', 'SERVICE') THEN CAST(d.parent_key AS INTEGER)
+  WHEN d.level_name = 'RESOURCE' AND instr(d.parent_key, '|') > 0
+    THEN CAST(substr(d.parent_key, 1, instr(d.parent_key, '|') - 1) AS INTEGER)
+  ELSE NULL
+END
+LEFT JOIN dim_service svc ON svc.service_sk = CASE
+  WHEN d.level_name = 'RESOURCE' AND instr(d.parent_key, '|') > 0
+    THEN CAST(substr(d.parent_key, instr(d.parent_key, '|') + 1) AS INTEGER)
+  ELSE NULL
+END;
 
 DROP VIEW IF EXISTS vw_pbi_commitment_utilization;
 CREATE VIEW vw_pbi_commitment_utilization AS
