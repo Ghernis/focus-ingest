@@ -37,11 +37,51 @@ func (p *Processor) canonicalApplicationSQL(normExpr string) string {
 	  ELSE %s END`, normExpr, normExpr, normExpr, normExpr, normExpr, normExpr)
 }
 
-func (p *Processor) applicationDimJoin() string {
+func (p *Processor) applicationCanonSQL() string {
 	raw := p.rawApplicationExpr()
 	norm := p.normalizeApplicationSQL(raw)
-	canon := p.canonicalApplicationSQL(norm)
-	return fmt.Sprintf("INNER JOIN dim_application da ON da.application_name = %s", canon)
+	return p.canonicalApplicationSQL(norm)
+}
+
+func (p *Processor) applicationDimJoin() string {
+	canon := p.applicationCanonSQL()
+	return fmt.Sprintf("LEFT JOIN dim_application da ON da.application_name = %s", canon)
+}
+
+func (p *Processor) applicationSKExpr() string {
+	if p.Dialect == "sqlserver" {
+		return "COALESCE(da.application_sk, (SELECT TOP 1 application_sk FROM dim_application WHERE application_name = '(UNASSIGNED)'))"
+	}
+	return "COALESCE(da.application_sk, (SELECT application_sk FROM dim_application WHERE application_name = '(UNASSIGNED)'))"
+}
+
+// ensureApplicationsForFactCanon inserts dim_application rows for every canonical
+// application name produced by the same SQL expression used in app aggregate joins.
+func (p *Processor) ensureApplicationsForFactCanon(ctx context.Context, tx *sql.Tx, extraWhere string) error {
+	if err := p.ensureDefaultApplication(ctx, tx, nil); err != nil {
+		return err
+	}
+	canon := p.applicationCanonSQL()
+	joins := p.appContextJoins()
+	where := "f.sub_account_sk IS NOT NULL"
+	if strings.TrimSpace(extraWhere) != "" {
+		where += " AND (" + extraWhere + ")"
+	}
+	now := p.nowUTC()
+	q := fmt.Sprintf(`
+		INSERT INTO dim_application (application_name, created_utc, updated_utc)
+		SELECT DISTINCT %s, %s, %s
+		FROM fact_focus_cost_daily f
+		%s
+		WHERE %s
+		  AND %s IS NOT NULL
+		  AND NOT EXISTS (SELECT 1 FROM dim_application da WHERE da.application_name = %s)`,
+		canon, now, now, joins, where, canon, canon)
+	if p.Dialect == "sqlite" {
+		q = strings.Replace(q, "INSERT INTO dim_application", "INSERT OR IGNORE INTO dim_application", 1)
+	}
+	_, err := tx.ExecContext(ctx, q)
+	return err
 }
 
 func (p *Processor) ensureDefaultApplication(ctx context.Context, tx *sql.Tx, cache applicationAliasCache) error {

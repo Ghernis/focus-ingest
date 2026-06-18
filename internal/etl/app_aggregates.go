@@ -91,21 +91,26 @@ func (p *Processor) rebuildAppAggregates(ctx context.Context, tx *sql.Tx) error 
 	now := p.nowUTC()
 	joins := p.appContextJoins()
 	appJoin := p.applicationDimJoin()
+	appSK := p.applicationSKExpr()
 	subJoin := p.subAccountJoin()
+
+	if err := p.ensureApplicationsForFactCanon(ctx, tx, ""); err != nil {
+		return fmt.Errorf("ensure app dims: %w", err)
+	}
 
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		INSERT INTO agg_app_monthly (
 		  month_start, provider, application_sk, environment,
 		  billed_cost, effective_cost, line_count, refreshed_utc)
-		SELECT %s, a.provider, da.application_sk, %s,
+		SELECT %s, a.provider, %s, %s,
 		  SUM(%s), SUM(%s), SUM(f.line_count), %s
 		FROM fact_focus_cost_daily f
 		%s
 		%s
 		%s
 		WHERE f.sub_account_sk IS NOT NULL
-		GROUP BY %s, a.provider, da.application_sk, %s`,
-		month, env, billed, effective, now, subJoin, joins, appJoin, month, env)); err != nil {
+		GROUP BY %s, a.provider, %s, %s`,
+		month, appSK, env, billed, effective, now, subJoin, joins, appJoin, month, appSK, env)); err != nil {
 		return fmt.Errorf("agg_app_monthly: %w", err)
 	}
 
@@ -113,15 +118,15 @@ func (p *Processor) rebuildAppAggregates(ctx context.Context, tx *sql.Tx) error 
 		INSERT INTO agg_app_service_monthly (
 		  month_start, provider, application_sk, environment, service_sk,
 		  billed_cost, effective_cost, line_count, refreshed_utc)
-		SELECT %s, a.provider, da.application_sk, %s, f.service_sk,
+		SELECT %s, a.provider, %s, %s, f.service_sk,
 		  SUM(%s), SUM(%s), SUM(f.line_count), %s
 		FROM fact_focus_cost_daily f
 		%s
 		%s
 		%s
 		WHERE f.sub_account_sk IS NOT NULL
-		GROUP BY %s, a.provider, da.application_sk, %s, f.service_sk`,
-		month, env, billed, effective, now, subJoin, joins, appJoin, month, env)); err != nil {
+		GROUP BY %s, a.provider, %s, %s, f.service_sk`,
+		month, appSK, env, billed, effective, now, subJoin, joins, appJoin, month, appSK, env)); err != nil {
 		return fmt.Errorf("agg_app_service_monthly: %w", err)
 	}
 
@@ -129,15 +134,15 @@ func (p *Processor) rebuildAppAggregates(ctx context.Context, tx *sql.Tx) error 
 		INSERT INTO agg_app_service_resource_monthly (
 		  month_start, provider, application_sk, environment, service_sk, resource_sk,
 		  billed_cost, effective_cost, line_count, refreshed_utc)
-		SELECT %s, a.provider, da.application_sk, %s, f.service_sk, f.resource_sk,
+		SELECT %s, a.provider, %s, %s, f.service_sk, f.resource_sk,
 		  SUM(%s), SUM(%s), SUM(f.line_count), %s
 		FROM fact_focus_cost_daily f
 		%s
 		%s
 		%s
 		WHERE f.sub_account_sk IS NOT NULL AND f.resource_sk IS NOT NULL
-		GROUP BY %s, a.provider, da.application_sk, %s, f.service_sk, f.resource_sk`,
-		month, env, billed, effective, now, subJoin, joins, appJoin, month, env)); err != nil {
+		GROUP BY %s, a.provider, %s, %s, f.service_sk, f.resource_sk`,
+		month, appSK, env, billed, effective, now, subJoin, joins, appJoin, month, appSK, env)); err != nil {
 		return fmt.Errorf("agg_app_service_resource_monthly: %w", err)
 	}
 
