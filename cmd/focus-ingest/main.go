@@ -38,6 +38,7 @@ var (
 	billingPeriod      string
 	allBillingPeriods  bool
 	publishFacts       bool
+	publishForcePeriods bool
 )
 
 func main() {
@@ -180,12 +181,14 @@ func publishCmd() *cobra.Command {
 				SQLitePath:        cfg.SQLitePath,
 				BillingPeriod:     billingPeriod,
 				AllBillingPeriods: allBillingPeriods,
+				ForcePeriods:      publishForcePeriods,
 				PublishFacts:      publishFacts,
 			})
 		},
 	}
 	cmd.Flags().StringVar(&billingPeriod, "billing-period", "", "Billing period start date to publish (YYYY-MM-DD); optional with --all-billing-periods")
 	cmd.Flags().BoolVar(&allBillingPeriods, "all-billing-periods", false, "Publish every distinct billing_period_start found in the local database")
+	cmd.Flags().BoolVar(&publishForcePeriods, "force-periods", false, "Replace billing periods entirely even when SQL Server already has more complete data (default: merge additive overlap rows)")
 	cmd.Flags().BoolVar(&publishFacts, "facts", false, "Also publish fact_focus_cost_daily and tag bridge for each published period")
 	return cmd
 }

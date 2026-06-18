@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ghernis/focus_dt/internal/etl"
+	"github.com/ghernis/focus_dt/internal/focus"
 )
 
 // Options controls publish from local SQLite to SQL Server.
@@ -16,6 +17,7 @@ type Options struct {
 	SQLitePath         string
 	BillingPeriod      string // YYYY-MM-DD; optional when AllBillingPeriods is true
 	AllBillingPeriods  bool
+	ForcePeriods       bool // replace all local periods even when server has more complete data
 	PublishFacts       bool
 	SourceFile         string // optional; defaults to sqlite basename
 }
@@ -64,6 +66,11 @@ func Publish(ctx context.Context, opts Options) error {
 		return fmt.Errorf("no billing periods found in local database")
 	}
 
+	plans, err := planPublishMonths(ctx, local, server, months, opts.ForcePeriods)
+	if err != nil {
+		return err
+	}
+
 	fmt.Println("Publishing pending dimensions to SQL Server...")
 	skMap, err := publishPendingDims(ctx, local, server)
 	if err != nil {
@@ -73,34 +80,48 @@ func Publish(ctx context.Context, opts Options) error {
 		fmt.Printf("  %d local SK(s) differ from server — remapping at publish time (no local DB rewrite)\n", n)
 	}
 
-	for _, m := range months {
-		fmt.Printf("Publishing aggregates for %s...\n", m)
-		if err := publishAggregates(ctx, local, server, m, skMap); err != nil {
-			return fmt.Errorf("aggregates %s: %w", m, err)
+	publishedMonths := make([]string, 0, len(plans))
+	for _, plan := range plans {
+		publishedMonths = append(publishedMonths, plan.month)
+		switch plan.mode {
+		case publishMerge:
+			fmt.Printf("Publishing aggregates (merge overlap) for %s...\n", plan.month)
+			if err := publishAggregatesMerge(ctx, local, server, plan.month, skMap); err != nil {
+				return fmt.Errorf("aggregates merge %s: %w", plan.month, err)
+			}
+		default:
+			fmt.Printf("Publishing aggregates for %s...\n", plan.month)
+			if err := publishAggregates(ctx, local, server, plan.month, skMap); err != nil {
+				return fmt.Errorf("aggregates %s: %w", plan.month, err)
+			}
 		}
 
 		if opts.PublishFacts {
-			batchID, err := ensurePublishBatch(ctx, server, m, opts.SourceFile)
-			if err != nil {
-				return fmt.Errorf("batch %s: %w", m, err)
+			if plan.mode == publishMerge {
+				fmt.Printf("  skipping facts for %s: overlap merge keeps prior-month facts unchanged (adjustments are in aggregates)\n", plan.month)
+				continue
 			}
-			fmt.Printf("Publishing facts for %s (batch %d)...\n", m, batchID)
-			n, err := publishFacts(ctx, local, server, m, batchID, skMap)
+			batchID, err := ensurePublishBatch(ctx, server, plan.month, opts.SourceFile)
 			if err != nil {
-				return fmt.Errorf("facts %s: %w", m, err)
+				return fmt.Errorf("batch %s: %w", plan.month, err)
+			}
+			fmt.Printf("Publishing facts for %s (batch %d)...\n", plan.month, batchID)
+			n, err := publishFacts(ctx, local, server, plan.month, batchID, skMap)
+			if err != nil {
+				return fmt.Errorf("facts %s: %w", plan.month, err)
 			}
 			fmt.Printf("  published %d fact rows\n", n)
 
-			nb, err := publishBridge(ctx, local, server, m, skMap)
+			nb, err := publishBridge(ctx, local, server, plan.month, skMap)
 			if err != nil {
-				return fmt.Errorf("bridge %s: %w", m, err)
+				return fmt.Errorf("bridge %s: %w", plan.month, err)
 			}
 			fmt.Printf("  published %d bridge tag rows\n", nb)
 		}
 	}
 
 	fmt.Println("Rebuilding cost anomalies on SQL Server...")
-	if err := rebuildServerAnomalies(ctx, server, months); err != nil {
+	if err := rebuildServerAnomalies(ctx, server, publishedMonths); err != nil {
 		return fmt.Errorf("anomalies: %w", err)
 	}
 
@@ -114,7 +135,7 @@ func Publish(ctx context.Context, opts Options) error {
 
 func resolvePublishMonths(ctx context.Context, local *sql.DB, single string, all bool) ([]string, error) {
 	if !all {
-		return []string{single}, nil
+		return []string{focus.DateOnly(strings.TrimSpace(single))}, nil
 	}
 	return distinctBillingMonths(ctx, local)
 }

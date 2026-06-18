@@ -152,6 +152,10 @@ func (p *Processor) rebuildAppAggregates(ctx context.Context, tx *sql.Tx) error 
 	return p.rebuildCostAnomalies(ctx, tx)
 }
 
+func (p *Processor) RebuildCostDistributionForMonth(ctx context.Context, tx *sql.Tx, month string) error {
+	return p.rebuildCostDistributionForMonth(ctx, tx, month)
+}
+
 func (p *Processor) rebuildCostDistributionForMonth(ctx context.Context, tx *sql.Tx, month string) error {
 	return p.rebuildCostDistributionFiltered(ctx, tx, monthEq("month_start", month))
 }

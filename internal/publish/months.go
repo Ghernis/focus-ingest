@@ -3,6 +3,9 @@ package publish
 import (
 	"context"
 	"database/sql"
+	"strings"
+
+	"github.com/ghernis/focus_dt/internal/focus"
 )
 
 func distinctBillingMonths(ctx context.Context, db *sql.DB) ([]string, error) {
@@ -12,11 +15,20 @@ func distinctBillingMonths(ctx context.Context, db *sql.DB) ([]string, error) {
 	}
 	defer rows.Close()
 	var out []string
+	seen := map[string]struct{}{}
 	for rows.Next() {
 		var m string
 		if err := rows.Scan(&m); err != nil {
 			return nil, err
 		}
+		m = focus.DateOnly(strings.TrimSpace(m))
+		if m == "" {
+			continue
+		}
+		if _, ok := seen[m]; ok {
+			continue
+		}
+		seen[m] = struct{}{}
 		out = append(out, m)
 	}
 	return out, rows.Err()
