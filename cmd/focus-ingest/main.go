@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -39,6 +40,7 @@ var (
 	allBillingPeriods  bool
 	publishFacts       bool
 	publishForcePeriods bool
+	listPeriodsPretty  bool
 )
 
 func main() {
@@ -65,6 +67,7 @@ func main() {
 	root.AddCommand(processETLCmd())
 	root.AddCommand(rebuildCmd())
 	root.AddCommand(publishCmd())
+	root.AddCommand(listBillingPeriodsCmd())
 	root.AddCommand(validateCmd())
 
 	if err := root.Execute(); err != nil {
@@ -190,6 +193,44 @@ func publishCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&allBillingPeriods, "all-billing-periods", false, "Publish every distinct billing_period_start found in the local database")
 	cmd.Flags().BoolVar(&publishForcePeriods, "force-periods", false, "Replace billing periods entirely even when SQL Server already has more complete data (default: merge additive overlap rows)")
 	cmd.Flags().BoolVar(&publishFacts, "facts", false, "Also publish fact_focus_cost_daily and tag bridge for each published period")
+	return cmd
+}
+
+func listBillingPeriodsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "list-billing-periods",
+		Short: "List billing periods in a local SQLite database (JSON)",
+		Long: `Reads distinct billing_period_start values from fact_focus_cost_daily.
+
+publish_periods omits the calendar month before primary_period when that overlap
+exists (typical at month rollover: publish July only, skip June overlap).`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path := sqlitePath
+			if path == "" {
+				path = config.DefaultSQLitePath
+			}
+			ctx := cmd.Context()
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			report, err := publish.ListBillingPeriods(ctx, path)
+			if err != nil {
+				return err
+			}
+			var out []byte
+			if listPeriodsPretty {
+				out, err = json.MarshalIndent(report, "", "  ")
+			} else {
+				out, err = json.Marshal(report)
+			}
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(out))
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&listPeriodsPretty, "pretty", false, "Indented JSON output")
 	return cmd
 }
 

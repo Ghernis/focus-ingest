@@ -27,6 +27,19 @@ func openSQLServer(ctx context.Context, connection string) (*sql.DB, error) {
 	return db, nil
 }
 
+func openSQLiteExisting(ctx context.Context, path string) (*sql.DB, error) {
+	db, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&mode=ro")
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	if err := db.PingContext(ctx); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("sqlite ping: %w", err)
+	}
+	return db, nil
+}
+
 func openSQLite(ctx context.Context, path string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
