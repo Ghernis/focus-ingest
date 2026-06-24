@@ -46,9 +46,15 @@ type dominantSku struct {
 	unitRate float64
 }
 
+type resourceServiceKey struct {
+	resourceSK int64
+	serviceSK  int64
+}
+
 type dailySkuAgg struct {
 	chargeDate string
 	skuSK      int64
+	serviceSK  int64
 	cost       float64
 	qty        float64
 }
@@ -81,6 +87,7 @@ func (p *Processor) rebuildRightsizingForMonth(ctx context.Context, tx *sql.Tx, 
 
 	currentDominant := dominantSkuByResourceMonth(skuAggs, month)
 	priorDominant := dominantSkuByResourceMonth(skuAggs, priorBillingMonth(month))
+
 	skuKeys, err := p.loadSkuNaturalKeys(ctx, tx)
 	if err != nil {
 		return err
@@ -216,24 +223,26 @@ func (p *Processor) loadResourceSkuMonthAggs(ctx context.Context, tx *sql.Tx, mo
 	return aggs, totals, rows.Err()
 }
 
-func dominantSkuByResourceMonth(aggs []skuMonthAgg, month string) map[int64]dominantSku {
+func dominantSkuByResourceMonth(aggs []skuMonthAgg, month string) map[resourceServiceKey]dominantSku {
 	month = focus.DateOnly(month)
-	byResource := map[int64]map[int64]skuMonthAgg{}
+	// Group by (resourceSK, serviceSK) so SKU comparisons stay within the same service.
+	byKey := map[resourceServiceKey]map[int64]skuMonthAgg{}
 	for _, a := range aggs {
 		if a.month != month {
 			continue
 		}
-		if byResource[a.resourceSK] == nil {
-			byResource[a.resourceSK] = map[int64]skuMonthAgg{}
+		k := resourceServiceKey{resourceSK: a.resourceSK, serviceSK: a.serviceSK}
+		if byKey[k] == nil {
+			byKey[k] = map[int64]skuMonthAgg{}
 		}
-		prev := byResource[a.resourceSK][a.skuSK]
+		prev := byKey[k][a.skuSK]
 		prev.skuCost += a.skuCost
 		prev.skuQty += a.skuQty
-		byResource[a.resourceSK][a.skuSK] = prev
+		byKey[k][a.skuSK] = prev
 	}
 
-	out := map[int64]dominantSku{}
-	for resSK, skus := range byResource {
+	out := map[resourceServiceKey]dominantSku{}
+	for k, skus := range byKey {
 		var best dominantSku
 		for skuSK, agg := range skus {
 			if agg.skuCost > best.cost ||
@@ -248,7 +257,7 @@ func dominantSkuByResourceMonth(aggs []skuMonthAgg, month string) map[int64]domi
 			}
 		}
 		if best.skuSK > 0 {
-			out[resSK] = best
+			out[k] = best
 		}
 	}
 	return out
@@ -287,7 +296,7 @@ func skuNaturalKey(keys map[int64]string, skuSK int64) string {
 
 func (p *Processor) insertMoMRightsizing(
 	ctx context.Context, tx *sql.Tx, month, priorMonth string,
-	current, prior map[int64]dominantSku,
+	current, prior map[resourceServiceKey]dominantSku,
 	resourceTotals map[string]map[int64]resourceMonthMeta,
 	skuAggs []skuMonthAgg,
 	rollups map[string]*serviceRightsizingRollup,
@@ -298,40 +307,44 @@ func (p *Processor) insertMoMRightsizing(
 		month_start, provider, resource_sk, service_sk, application_sk, environment,
 		prior_month_start, prior_sku_sk, current_sku_sk,
 		prior_unit_rate, current_unit_rate, post_change_quantity,
-		realized_savings_unit, realized_savings_cost_delta, change_direction, refreshed_utc
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+		realized_savings_unit, realized_savings_cost_delta, projected_annual_savings, change_direction, refreshed_utc
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
 	if p.Dialect == "sqlserver" {
 		insertSQL = `INSERT INTO agg_resource_rightsizing_monthly (
 		month_start, provider, resource_sk, service_sk, application_sk, environment,
 		prior_month_start, prior_sku_sk, current_sku_sk,
 		prior_unit_rate, current_unit_rate, post_change_quantity,
-		realized_savings_unit, realized_savings_cost_delta, change_direction, refreshed_utc
-	) VALUES (@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15,@p16)`
+		realized_savings_unit, realized_savings_cost_delta, projected_annual_savings, change_direction, refreshed_utc
+	) VALUES (@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15,@p16,@p17)`
 	}
 
-	for resSK, cur := range current {
-		prev, ok := prior[resSK]
+	// Compare dominant SKUs within the same (resource, service) pair only.
+	for key, cur := range current {
+		prev, ok := prior[key]
 		if !ok || skuNaturalKey(skuKeys, prev.skuSK) == skuNaturalKey(skuKeys, cur.skuSK) {
 			continue
 		}
+		resSK := key.resourceSK
+		svcSK := key.serviceSK
 		meta := resourceTotals[month][resSK]
 		priorMeta := resourceTotals[priorMonth][resSK]
 		postQty := currentSkuQty(skuAggs, month, resSK, cur.skuSK)
 
 		unitSavings := (prev.unitRate - cur.unitRate) * postQty
 		costDelta := priorMeta.totalCost - meta.totalCost
+		projectedAnnual := unitSavings * 12
 		dir := changeDirection(prev.unitRate, cur.unitRate)
 
 		_, err := tx.ExecContext(ctx, p.q(insertSQL),
-			month, meta.provider, resSK, meta.serviceSK, meta.applicationSK, meta.environment,
+			month, meta.provider, resSK, svcSK, meta.applicationSK, meta.environment,
 			priorMonth, prev.skuSK, cur.skuSK,
 			formatCost(prev.unitRate), formatCost(cur.unitRate), formatCost(postQty),
-			formatCost(unitSavings), formatCost(costDelta), dir, now,
+			formatCost(unitSavings), formatCost(costDelta), formatCost(projectedAnnual), dir, now,
 		)
 		if err != nil {
 			return fmt.Errorf("agg_resource_rightsizing_monthly: %w", err)
 		}
-		addRollup(rollups, meta.provider, meta.serviceSK, unitSavings, costDelta, dir, true, false)
+		addRollup(rollups, meta.provider, svcSK, unitSavings, costDelta, dir, true, false)
 	}
 	return nil
 }
@@ -345,36 +358,46 @@ func (p *Processor) insertIntraMonthRightsizing(ctx context.Context, tx *sql.Tx,
 	insertSQL := `INSERT INTO agg_resource_rightsizing_intramonth (
 		month_start, provider, resource_sk, service_sk, application_sk, environment,
 		change_date, prior_sku_sk, new_sku_sk, days_on_prior_sku, days_on_new_sku,
-		realized_savings_unit, realized_savings_cost_delta, change_direction, refreshed_utc
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+		realized_savings_unit, realized_savings_cost_delta, projected_annual_savings, change_direction, refreshed_utc
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
 	if p.Dialect == "sqlserver" {
 		insertSQL = `INSERT INTO agg_resource_rightsizing_intramonth (
 		month_start, provider, resource_sk, service_sk, application_sk, environment,
 		change_date, prior_sku_sk, new_sku_sk, days_on_prior_sku, days_on_new_sku,
-		realized_savings_unit, realized_savings_cost_delta, change_direction, refreshed_utc
-	) VALUES (@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15)`
+		realized_savings_unit, realized_savings_cost_delta, projected_annual_savings, change_direction, refreshed_utc
+	) VALUES (@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15,@p16)`
 	}
 
 	for resSK, days := range daily {
-		events := detectIntraMonthChanges(days, skuKeys)
-		if len(events) == 0 {
-			continue
-		}
 		meta := metaByResource[resSK]
-		for _, ev := range events {
-			unitSavings := (ev.priorUnitRate - ev.newUnitRate) * ev.newQty
-			costDelta := (ev.priorUnitRate * ev.totalQty) - ev.actualCost
-			dir := changeDirection(ev.priorUnitRate, ev.newUnitRate)
 
-			_, err := tx.ExecContext(ctx, p.q(insertSQL),
-				month, meta.provider, resSK, meta.serviceSK, meta.applicationSK, meta.environment,
-				ev.changeDate, ev.priorSKU, ev.newSKU, ev.daysPrior, ev.daysNew,
-				formatCost(unitSavings), formatCost(costDelta), dir, now,
-			)
-			if err != nil {
-				return fmt.Errorf("agg_resource_rightsizing_intramonth: %w", err)
+		// Group rows by serviceSK so SKU transitions are only detected within the same service.
+		byService := map[int64][]dailySkuAgg{}
+		for _, d := range days {
+			byService[d.serviceSK] = append(byService[d.serviceSK], d)
+		}
+
+		for svcSK, svcDays := range byService {
+			events := detectIntraMonthChanges(svcDays, skuKeys)
+			for _, ev := range events {
+				unitSavings := (ev.priorUnitRate - ev.newUnitRate) * ev.newQty
+				costDelta := (ev.priorUnitRate * ev.totalQty) - ev.actualCost
+				var projectedAnnual float64
+				if ev.daysNew > 0 {
+					projectedAnnual = unitSavings / float64(ev.daysNew) * 365
+				}
+				dir := changeDirection(ev.priorUnitRate, ev.newUnitRate)
+
+				_, err := tx.ExecContext(ctx, p.q(insertSQL),
+					month, meta.provider, resSK, svcSK, meta.applicationSK, meta.environment,
+					ev.changeDate, ev.priorSKU, ev.newSKU, ev.daysPrior, ev.daysNew,
+					formatCost(unitSavings), formatCost(costDelta), formatCost(projectedAnnual), dir, now,
+				)
+				if err != nil {
+					return fmt.Errorf("agg_resource_rightsizing_intramonth: %w", err)
+				}
+				addRollup(rollups, meta.provider, svcSK, unitSavings, costDelta, dir, false, true)
 			}
-			addRollup(rollups, meta.provider, meta.serviceSK, unitSavings, costDelta, dir, false, true)
 		}
 	}
 	return nil
@@ -537,9 +560,11 @@ func (p *Processor) loadDailyResourceSkuAggs(ctx context.Context, tx *sql.Tx, mo
 		out[resourceSK] = append(out[resourceSK], dailySkuAgg{
 			chargeDate: chargeDate,
 			skuSK:      skuSK,
+			serviceSK:  serviceSK,
 			cost:       parseDecimal(costStr),
 			qty:        parseDecimal(qtyStr),
 		})
+		// provider/applicationSK/environment are resource-level; last write wins (same value for all rows).
 		meta[resourceSK] = resourceMonthMeta{
 			provider:      provider,
 			serviceSK:     serviceSK,

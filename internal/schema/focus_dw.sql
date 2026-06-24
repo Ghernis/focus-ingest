@@ -1095,9 +1095,10 @@ BEGIN
     post_change_quantity                DECIMAL(28,10) NOT NULL DEFAULT 0,
     realized_savings_unit               DECIMAL(28,10) NOT NULL DEFAULT 0,
     realized_savings_cost_delta         DECIMAL(28,10) NOT NULL DEFAULT 0,
+    projected_annual_savings            DECIMAL(28,10) NOT NULL DEFAULT 0,
     change_direction                    VARCHAR(16) NOT NULL,
     refreshed_utc                       DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
-    UNIQUE (month_start, provider, resource_sk)
+    UNIQUE (month_start, provider, resource_sk, service_sk)
   );
 END
 GO
@@ -1126,9 +1127,10 @@ BEGIN
     days_on_new_sku                        INT NOT NULL DEFAULT 0,
     realized_savings_unit                  DECIMAL(28,10) NOT NULL DEFAULT 0,
     realized_savings_cost_delta            DECIMAL(28,10) NOT NULL DEFAULT 0,
+    projected_annual_savings               DECIMAL(28,10) NOT NULL DEFAULT 0,
     change_direction                       VARCHAR(16) NOT NULL,
     refreshed_utc                          DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
-    UNIQUE (month_start, provider, resource_sk, change_date, new_sku_sk)
+    UNIQUE (month_start, provider, resource_sk, service_sk, change_date, new_sku_sk)
   );
 END
 GO
@@ -1812,6 +1814,7 @@ SELECT
     r.post_change_quantity,
     r.realized_savings_unit,
     r.realized_savings_cost_delta,
+    r.projected_annual_savings,
     r.change_direction,
     r.refreshed_utc
 FROM dbo.agg_resource_rightsizing_monthly r
@@ -1842,6 +1845,7 @@ SELECT
     r.days_on_new_sku,
     r.realized_savings_unit,
     r.realized_savings_cost_delta,
+    r.projected_annual_savings,
     r.change_direction,
     r.refreshed_utc
 FROM dbo.agg_resource_rightsizing_intramonth r

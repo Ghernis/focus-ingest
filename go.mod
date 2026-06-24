@@ -1,6 +1,6 @@
 module github.com/ghernis/focus_dt
 
-go 1.25.7
+go 1.25.5
 
 require (
 	github.com/andybalholm/brotli v1.1.1 // indirect

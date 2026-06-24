@@ -28,8 +28,8 @@ func TestChangeDirection(t *testing.T) {
 func TestDetectIntraMonthChanges(t *testing.T) {
 	keys := map[int64]string{1: "AWS|SKU-LARGE", 2: "AWS|SKU-SMALL"}
 	days := []dailySkuAgg{
-		{chargeDate: "2024-03-10", skuSK: 1, cost: 100, qty: 10},
-		{chargeDate: "2024-03-20", skuSK: 2, cost: 40, qty: 10},
+		{chargeDate: "2024-03-10", skuSK: 1, serviceSK: 1, cost: 100, qty: 10},
+		{chargeDate: "2024-03-20", skuSK: 2, serviceSK: 1, cost: 40, qty: 10},
 	}
 	events := detectIntraMonthChanges(days, keys)
 	if len(events) != 1 {

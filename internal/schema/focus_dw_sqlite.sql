@@ -616,9 +616,10 @@ CREATE TABLE IF NOT EXISTS agg_resource_rightsizing_monthly (
   post_change_quantity                TEXT NOT NULL DEFAULT '0',
   realized_savings_unit               TEXT NOT NULL DEFAULT '0',
   realized_savings_cost_delta         TEXT NOT NULL DEFAULT '0',
+  projected_annual_savings            TEXT NOT NULL DEFAULT '0',
   change_direction                    TEXT NOT NULL,
   refreshed_utc                       TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (month_start, provider, resource_sk)
+  UNIQUE (month_start, provider, resource_sk, service_sk)
 );
 
 CREATE TABLE IF NOT EXISTS agg_resource_rightsizing_intramonth (
@@ -636,9 +637,10 @@ CREATE TABLE IF NOT EXISTS agg_resource_rightsizing_intramonth (
   days_on_new_sku                        INTEGER NOT NULL DEFAULT 0,
   realized_savings_unit                  TEXT NOT NULL DEFAULT '0',
   realized_savings_cost_delta            TEXT NOT NULL DEFAULT '0',
+  projected_annual_savings               TEXT NOT NULL DEFAULT '0',
   change_direction                       TEXT NOT NULL,
   refreshed_utc                          TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (month_start, provider, resource_sk, change_date, new_sku_sk)
+  UNIQUE (month_start, provider, resource_sk, service_sk, change_date, new_sku_sk)
 );
 
 CREATE TABLE IF NOT EXISTS agg_rightsizing_summary_monthly (

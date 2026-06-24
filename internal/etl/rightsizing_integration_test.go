@@ -141,6 +141,102 @@ func TestRightsizing_IntraMonthTransition(t *testing.T) {
 	}
 }
 
+// TestRightsizing_IntraMonth_CrossServiceNoise verifies that SKU transitions are
+// only detected within the same service. A network SKU appearing alongside a
+// compute SKU on the same resource must NOT trigger a rightsizing event.
+func TestRightsizing_IntraMonth_CrossServiceNoise(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	path := filepath.Join(t.TempDir(), "rightsizing_noise.db")
+	s, err := store.OpenSQLite(path, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.ApplySchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Compute service: SKU changes from sku-large to sku-small on day 20.
+	importRightsizingRowWithService(ctx, t, s, "c1.parquet", "2024-05-10", "2024-05-01", "i-noise", "sku-large", "10", "100", "Amazon Elastic Compute Cloud")
+	importRightsizingRowWithService(ctx, t, s, "c2.parquet", "2024-05-20", "2024-05-01", "i-noise", "sku-small", "10", "40", "Amazon Elastic Compute Cloud")
+
+	// Network service on the same resource and same days: different service_sk, should be ignored.
+	importRightsizingRowWithService(ctx, t, s, "n1.parquet", "2024-05-10", "2024-05-01", "i-noise", "sku-net-a", "50", "5", "Amazon Virtual Private Cloud")
+	importRightsizingRowWithService(ctx, t, s, "n2.parquet", "2024-05-20", "2024-05-01", "i-noise", "sku-net-b", "50", "3", "Amazon Virtual Private Cloud")
+
+	if _, err := s.RebuildAggregates(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+
+	db := openRightsizingTestDB(t, path)
+	defer db.Close()
+
+	// Must have exactly 1 intramonth event: the compute SKU transition only.
+	var intraCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agg_resource_rightsizing_intramonth WHERE month_start = '2024-05-01'`).Scan(&intraCount); err != nil {
+		t.Fatal(err)
+	}
+	if intraCount != 1 {
+		t.Fatalf("expected 1 intramonth event (compute only), got %d", intraCount)
+	}
+
+	// Confirm the one event is the compute transition (downsize).
+	var direction string
+	var projectedAnnual float64
+	if err := db.QueryRowContext(ctx, `
+		SELECT change_direction, CAST(projected_annual_savings AS REAL)
+		FROM agg_resource_rightsizing_intramonth r
+		INNER JOIN dim_resource res ON r.resource_sk = res.resource_sk
+		WHERE month_start = '2024-05-01' AND res.global_resource_id = 'i-noise'`).Scan(&direction, &projectedAnnual); err != nil {
+		t.Fatal(err)
+	}
+	if direction != "DOWNSIZE" {
+		t.Fatalf("direction=%s want DOWNSIZE", direction)
+	}
+	if projectedAnnual <= 0 {
+		t.Fatalf("projected_annual_savings=%v want >0", projectedAnnual)
+	}
+}
+
+func importRightsizingRowWithService(ctx context.Context, t *testing.T, s store.Store, file, chargeDate, billingMonth, resourceID, skuID, qty, cost, serviceName string) {
+	t.Helper()
+	batchID, err := s.BeginBatch(ctx, store.BatchMeta{
+		SourceProvider: "aws",
+		FocusVersion:   "1.0",
+		SourceFile:     file,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := focus.StagingRow{
+		SourceProvider:     "aws",
+		Provider:           strPtr("Amazon Web Services"),
+		BillingAccountId:   strPtr("123456789012"),
+		SubAccountId:       strPtr("123456789012"),
+		ChargePeriodStart:  strPtr(chargeDate + "T00:00:00Z"),
+		ChargePeriodEnd:    strPtr(chargeDate + "T00:00:00Z"),
+		BillingPeriodStart: strPtr(billingMonth),
+		BillingPeriodEnd:   strPtr(billingMonth),
+		ChargeCategory:     strPtr("Usage"),
+		PricingCategory:    strPtr("OnDemand"),
+		ServiceName:        strPtr(serviceName),
+		ResourceId:         strPtr(resourceID),
+		ResourceType:       strPtr("instance"),
+		SkuId:              strPtr(skuID),
+		PricingQuantity:    strPtr(qty),
+		BilledCost:         strPtr(cost),
+		EffectiveCost:      strPtr(cost),
+	}
+	if err := s.InsertStaging(ctx, batchID, "1.0", file, []focus.StagingRow{row}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ProcessBatch(ctx, batchID, "1.0"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func importRightsizingRow(ctx context.Context, t *testing.T, s store.Store, file, chargeDate, billingMonth, resourceID, skuID, qty, cost string) {
 	t.Helper()
 	batchID, err := s.BeginBatch(ctx, store.BatchMeta{
