@@ -1044,9 +1044,125 @@ BEGIN
     total_effective_cost   DECIMAL(28,10) NOT NULL DEFAULT 0,
     total_projected_savings DECIMAL(18,2) NOT NULL DEFAULT 0,
     recommendation_count   INT NOT NULL DEFAULT 0,
+    total_realized_savings_unit DECIMAL(28,10) NOT NULL DEFAULT 0,
+    total_realized_savings_cost_delta DECIMAL(28,10) NOT NULL DEFAULT 0,
+    rightsizing_change_count INT NOT NULL DEFAULT 0,
     refreshed_utc          DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
     UNIQUE (month_start, provider, service_sk)
   );
+END
+GO
+
+IF COL_LENGTH('dbo.agg_savings_summary', 'total_realized_savings_unit') IS NULL
+BEGIN
+  ALTER TABLE dbo.agg_savings_summary ADD total_realized_savings_unit DECIMAL(28,10) NOT NULL
+    CONSTRAINT DF_agg_savings_realized_unit DEFAULT 0;
+  ALTER TABLE dbo.agg_savings_summary DROP CONSTRAINT DF_agg_savings_realized_unit;
+END
+GO
+
+IF COL_LENGTH('dbo.agg_savings_summary', 'total_realized_savings_cost_delta') IS NULL
+BEGIN
+  ALTER TABLE dbo.agg_savings_summary ADD total_realized_savings_cost_delta DECIMAL(28,10) NOT NULL
+    CONSTRAINT DF_agg_savings_realized_delta DEFAULT 0;
+  ALTER TABLE dbo.agg_savings_summary DROP CONSTRAINT DF_agg_savings_realized_delta;
+END
+GO
+
+IF COL_LENGTH('dbo.agg_savings_summary', 'rightsizing_change_count') IS NULL
+BEGIN
+  ALTER TABLE dbo.agg_savings_summary ADD rightsizing_change_count INT NOT NULL
+    CONSTRAINT DF_agg_savings_rightsizing_cnt DEFAULT 0;
+  ALTER TABLE dbo.agg_savings_summary DROP CONSTRAINT DF_agg_savings_rightsizing_cnt;
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.agg_resource_rightsizing_monthly') AND type = N'U')
+BEGIN
+  CREATE TABLE dbo.agg_resource_rightsizing_monthly (
+    agg_resource_rightsizing_monthly_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+    month_start                         DATE NOT NULL,
+    provider                            VARCHAR(10) NOT NULL,
+    resource_sk                         INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_resource(resource_sk),
+    service_sk                          INT NOT NULL,
+    application_sk                      INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_application(application_sk),
+    environment                         NVARCHAR(128) NOT NULL DEFAULT '(Unknown)',
+    prior_month_start                   DATE NOT NULL,
+    prior_sku_sk                        INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_sku(sku_sk),
+    current_sku_sk                      INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_sku(sku_sk),
+    prior_unit_rate                     DECIMAL(28,10) NOT NULL DEFAULT 0,
+    current_unit_rate                   DECIMAL(28,10) NOT NULL DEFAULT 0,
+    post_change_quantity                DECIMAL(28,10) NOT NULL DEFAULT 0,
+    realized_savings_unit               DECIMAL(28,10) NOT NULL DEFAULT 0,
+    realized_savings_cost_delta         DECIMAL(28,10) NOT NULL DEFAULT 0,
+    change_direction                    VARCHAR(16) NOT NULL,
+    refreshed_utc                       DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    UNIQUE (month_start, provider, resource_sk)
+  );
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_resource_rightsizing_monthly_month' AND object_id = OBJECT_ID(N'dbo.agg_resource_rightsizing_monthly'))
+BEGIN
+  CREATE INDEX IX_agg_resource_rightsizing_monthly_month
+    ON dbo.agg_resource_rightsizing_monthly (month_start, provider, service_sk);
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.agg_resource_rightsizing_intramonth') AND type = N'U')
+BEGIN
+  CREATE TABLE dbo.agg_resource_rightsizing_intramonth (
+    agg_resource_rightsizing_intramonth_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+    month_start                            DATE NOT NULL,
+    provider                               VARCHAR(10) NOT NULL,
+    resource_sk                            INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_resource(resource_sk),
+    service_sk                             INT NOT NULL,
+    application_sk                         INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_application(application_sk),
+    environment                            NVARCHAR(128) NOT NULL DEFAULT '(Unknown)',
+    change_date                            DATE NOT NULL,
+    prior_sku_sk                           INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_sku(sku_sk),
+    new_sku_sk                             INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_sku(sku_sk),
+    days_on_prior_sku                      INT NOT NULL DEFAULT 0,
+    days_on_new_sku                        INT NOT NULL DEFAULT 0,
+    realized_savings_unit                  DECIMAL(28,10) NOT NULL DEFAULT 0,
+    realized_savings_cost_delta            DECIMAL(28,10) NOT NULL DEFAULT 0,
+    change_direction                       VARCHAR(16) NOT NULL,
+    refreshed_utc                          DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    UNIQUE (month_start, provider, resource_sk, change_date, new_sku_sk)
+  );
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_resource_rightsizing_intramonth_month' AND object_id = OBJECT_ID(N'dbo.agg_resource_rightsizing_intramonth'))
+BEGIN
+  CREATE INDEX IX_agg_resource_rightsizing_intramonth_month
+    ON dbo.agg_resource_rightsizing_intramonth (month_start, provider, resource_sk);
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.agg_rightsizing_summary_monthly') AND type = N'U')
+BEGIN
+  CREATE TABLE dbo.agg_rightsizing_summary_monthly (
+    agg_rightsizing_summary_monthly_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+    month_start                        DATE NOT NULL,
+    provider                           VARCHAR(10) NOT NULL,
+    service_sk                         INT NOT NULL,
+    total_realized_savings_unit        DECIMAL(28,10) NOT NULL DEFAULT 0,
+    total_realized_savings_cost_delta  DECIMAL(28,10) NOT NULL DEFAULT 0,
+    mom_change_count                   INT NOT NULL DEFAULT 0,
+    intramonth_change_count            INT NOT NULL DEFAULT 0,
+    downsize_count                     INT NOT NULL DEFAULT 0,
+    upsize_count                       INT NOT NULL DEFAULT 0,
+    refreshed_utc                      DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    UNIQUE (month_start, provider, service_sk)
+  );
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_rightsizing_summary_monthly_month' AND object_id = OBJECT_ID(N'dbo.agg_rightsizing_summary_monthly'))
+BEGIN
+  CREATE INDEX IX_agg_rightsizing_summary_monthly_month
+    ON dbo.agg_rightsizing_summary_monthly (month_start, provider, service_sk);
 END
 GO
 
@@ -1674,6 +1790,85 @@ FROM dbo.agg_commitment_utilization a
 INNER JOIN dbo.dim_commitment_discount c ON a.commitment_sk = c.commitment_sk;
 GO
 
+CREATE OR ALTER VIEW dbo.vw_pbi_rightsizing_resource_monthly AS
+SELECT
+    r.month_start,
+    r.provider,
+    r.prior_month_start,
+    r.resource_sk,
+    res.name AS resource_name,
+    res.resource_type,
+    r.service_sk,
+    svc.service_name,
+    app.application_sk,
+    app.application_name,
+    r.environment,
+    r.prior_sku_sk,
+    ps.sku_id AS prior_sku_id,
+    r.current_sku_sk,
+    cs.sku_id AS current_sku_id,
+    r.prior_unit_rate,
+    r.current_unit_rate,
+    r.post_change_quantity,
+    r.realized_savings_unit,
+    r.realized_savings_cost_delta,
+    r.change_direction,
+    r.refreshed_utc
+FROM dbo.agg_resource_rightsizing_monthly r
+INNER JOIN dbo.dim_resource res ON r.resource_sk = res.resource_sk
+INNER JOIN dbo.dim_service svc ON r.service_sk = svc.service_sk
+INNER JOIN dbo.dim_application app ON r.application_sk = app.application_sk
+INNER JOIN dbo.dim_sku ps ON r.prior_sku_sk = ps.sku_sk
+INNER JOIN dbo.dim_sku cs ON r.current_sku_sk = cs.sku_sk;
+GO
+
+CREATE OR ALTER VIEW dbo.vw_pbi_rightsizing_intramonth AS
+SELECT
+    r.month_start,
+    r.provider,
+    r.change_date,
+    r.resource_sk,
+    res.name AS resource_name,
+    r.service_sk,
+    svc.service_name,
+    app.application_sk,
+    app.application_name,
+    r.environment,
+    r.prior_sku_sk,
+    ps.sku_id AS prior_sku_id,
+    r.new_sku_sk,
+    ns.sku_id AS new_sku_id,
+    r.days_on_prior_sku,
+    r.days_on_new_sku,
+    r.realized_savings_unit,
+    r.realized_savings_cost_delta,
+    r.change_direction,
+    r.refreshed_utc
+FROM dbo.agg_resource_rightsizing_intramonth r
+INNER JOIN dbo.dim_resource res ON r.resource_sk = res.resource_sk
+INNER JOIN dbo.dim_service svc ON r.service_sk = svc.service_sk
+INNER JOIN dbo.dim_application app ON r.application_sk = app.application_sk
+INNER JOIN dbo.dim_sku ps ON r.prior_sku_sk = ps.sku_sk
+INNER JOIN dbo.dim_sku ns ON r.new_sku_sk = ns.sku_sk;
+GO
+
+CREATE OR ALTER VIEW dbo.vw_pbi_rightsizing_summary_monthly AS
+SELECT
+    a.month_start,
+    a.provider,
+    a.service_sk,
+    svc.service_name,
+    a.total_realized_savings_unit,
+    a.total_realized_savings_cost_delta,
+    a.mom_change_count,
+    a.intramonth_change_count,
+    a.downsize_count,
+    a.upsize_count,
+    a.refreshed_utc
+FROM dbo.agg_rightsizing_summary_monthly a
+INNER JOIN dbo.dim_service svc ON a.service_sk = svc.service_sk;
+GO
+
 CREATE OR ALTER VIEW dbo.vw_pbi_savings_summary AS
 SELECT
     a.month_start,
@@ -1682,6 +1877,9 @@ SELECT
     a.total_effective_cost,
     a.total_projected_savings,
     a.recommendation_count,
+    a.total_realized_savings_unit,
+    a.total_realized_savings_cost_delta,
+    a.rightsizing_change_count,
     a.refreshed_utc
 FROM dbo.agg_savings_summary a
 INNER JOIN dbo.dim_service svc ON a.service_sk = svc.service_sk;

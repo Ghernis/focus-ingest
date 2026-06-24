@@ -10,6 +10,7 @@ func (p *Processor) rebuildAggregates(ctx context.Context, tx *sql.Tx, _ []strin
 	tables := []string{
 		"agg_cost_daily", "agg_cost_monthly", "agg_cost_by_tag",
 		"agg_commitment_utilization", "agg_commitment_utilization_daily", "agg_savings_summary",
+		"agg_resource_rightsizing_monthly", "agg_resource_rightsizing_intramonth", "agg_rightsizing_summary_monthly",
 		"agg_app_monthly", "agg_app_service_monthly", "agg_app_service_resource_monthly",
 		"agg_cost_distribution_monthly",
 		"agg_cost_anomaly_monthly",
@@ -104,9 +105,9 @@ func (p *Processor) rebuildAggregates(ctx context.Context, tx *sql.Tx, _ []strin
 	}
 
 	savingsSQL := fmt.Sprintf(`
-		INSERT INTO agg_savings_summary (month_start, provider, service_sk, total_effective_cost, total_projected_savings, recommendation_count, refreshed_utc)
+		INSERT INTO agg_savings_summary (month_start, provider, service_sk, total_effective_cost, total_projected_savings, recommendation_count, total_realized_savings_unit, total_realized_savings_cost_delta, rightsizing_change_count, refreshed_utc)
 		SELECT %s, a.provider, f.service_sk,
-		  SUM(%s), 0, 0, %s
+		  SUM(%s), 0, 0, 0, 0, 0, %s
 		FROM fact_focus_cost_daily f
 		%s
 		WHERE f.sub_account_sk IS NOT NULL
@@ -116,7 +117,10 @@ func (p *Processor) rebuildAggregates(ctx context.Context, tx *sql.Tx, _ []strin
 		return fmt.Errorf("agg_savings_summary: %w", err)
 	}
 
-	return p.rebuildAppAggregates(ctx, tx)
+	if err := p.rebuildAppAggregates(ctx, tx); err != nil {
+		return err
+	}
+	return p.rebuildRightsizingAllMonths(ctx, tx)
 }
 
 // satisfy unused import when aggregates only use ctx

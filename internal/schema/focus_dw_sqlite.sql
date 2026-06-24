@@ -586,16 +586,82 @@ CREATE TABLE IF NOT EXISTS agg_commitment_utilization_daily (
 );
 
 CREATE TABLE IF NOT EXISTS agg_savings_summary (
-  agg_savings_summary_id  INTEGER PRIMARY KEY AUTOINCREMENT,
-  month_start             TEXT NOT NULL,
-  provider                TEXT NOT NULL,
-  service_sk              INTEGER NOT NULL,
-  total_effective_cost    TEXT NOT NULL DEFAULT '0',
-  total_projected_savings TEXT NOT NULL DEFAULT '0',
-  recommendation_count    INTEGER NOT NULL DEFAULT 0,
-  refreshed_utc           TEXT NOT NULL DEFAULT (datetime('now')),
+  agg_savings_summary_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  month_start                  TEXT NOT NULL,
+  provider                     TEXT NOT NULL,
+  service_sk                   INTEGER NOT NULL,
+  total_effective_cost         TEXT NOT NULL DEFAULT '0',
+  total_projected_savings      TEXT NOT NULL DEFAULT '0',
+  recommendation_count         INTEGER NOT NULL DEFAULT 0,
+  total_realized_savings_unit  TEXT NOT NULL DEFAULT '0',
+  total_realized_savings_cost_delta TEXT NOT NULL DEFAULT '0',
+  rightsizing_change_count     INTEGER NOT NULL DEFAULT 0,
+  refreshed_utc                TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (month_start, provider, service_sk)
 );
+
+CREATE TABLE IF NOT EXISTS agg_resource_rightsizing_monthly (
+  agg_resource_rightsizing_monthly_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  month_start                         TEXT NOT NULL,
+  provider                            TEXT NOT NULL,
+  resource_sk                         INTEGER NOT NULL REFERENCES dim_resource(resource_sk),
+  service_sk                          INTEGER NOT NULL,
+  application_sk                      INTEGER NOT NULL REFERENCES dim_application(application_sk),
+  environment                         TEXT NOT NULL DEFAULT '(Unknown)',
+  prior_month_start                   TEXT NOT NULL,
+  prior_sku_sk                        INTEGER NOT NULL REFERENCES dim_sku(sku_sk),
+  current_sku_sk                      INTEGER NOT NULL REFERENCES dim_sku(sku_sk),
+  prior_unit_rate                     TEXT NOT NULL DEFAULT '0',
+  current_unit_rate                   TEXT NOT NULL DEFAULT '0',
+  post_change_quantity                TEXT NOT NULL DEFAULT '0',
+  realized_savings_unit               TEXT NOT NULL DEFAULT '0',
+  realized_savings_cost_delta         TEXT NOT NULL DEFAULT '0',
+  change_direction                    TEXT NOT NULL,
+  refreshed_utc                       TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (month_start, provider, resource_sk)
+);
+
+CREATE TABLE IF NOT EXISTS agg_resource_rightsizing_intramonth (
+  agg_resource_rightsizing_intramonth_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  month_start                            TEXT NOT NULL,
+  provider                               TEXT NOT NULL,
+  resource_sk                            INTEGER NOT NULL REFERENCES dim_resource(resource_sk),
+  service_sk                             INTEGER NOT NULL,
+  application_sk                         INTEGER NOT NULL REFERENCES dim_application(application_sk),
+  environment                            TEXT NOT NULL DEFAULT '(Unknown)',
+  change_date                            TEXT NOT NULL,
+  prior_sku_sk                           INTEGER NOT NULL REFERENCES dim_sku(sku_sk),
+  new_sku_sk                             INTEGER NOT NULL REFERENCES dim_sku(sku_sk),
+  days_on_prior_sku                      INTEGER NOT NULL DEFAULT 0,
+  days_on_new_sku                        INTEGER NOT NULL DEFAULT 0,
+  realized_savings_unit                  TEXT NOT NULL DEFAULT '0',
+  realized_savings_cost_delta            TEXT NOT NULL DEFAULT '0',
+  change_direction                       TEXT NOT NULL,
+  refreshed_utc                          TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (month_start, provider, resource_sk, change_date, new_sku_sk)
+);
+
+CREATE TABLE IF NOT EXISTS agg_rightsizing_summary_monthly (
+  agg_rightsizing_summary_monthly_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  month_start                        TEXT NOT NULL,
+  provider                           TEXT NOT NULL,
+  service_sk                         INTEGER NOT NULL,
+  total_realized_savings_unit        TEXT NOT NULL DEFAULT '0',
+  total_realized_savings_cost_delta  TEXT NOT NULL DEFAULT '0',
+  mom_change_count                   INTEGER NOT NULL DEFAULT 0,
+  intramonth_change_count            INTEGER NOT NULL DEFAULT 0,
+  downsize_count                     INTEGER NOT NULL DEFAULT 0,
+  upsize_count                       INTEGER NOT NULL DEFAULT 0,
+  refreshed_utc                      TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (month_start, provider, service_sk)
+);
+
+CREATE INDEX IF NOT EXISTS IX_agg_resource_rightsizing_monthly_month
+  ON agg_resource_rightsizing_monthly (month_start, provider, service_sk);
+CREATE INDEX IF NOT EXISTS IX_agg_resource_rightsizing_intramonth_month
+  ON agg_resource_rightsizing_intramonth (month_start, provider, resource_sk);
+CREATE INDEX IF NOT EXISTS IX_agg_rightsizing_summary_monthly_month
+  ON agg_rightsizing_summary_monthly (month_start, provider, service_sk);
 
 -- Application spend (primary metric: billed_cost = actual paid after discounts/credits)
 CREATE TABLE IF NOT EXISTS agg_app_monthly (
@@ -848,9 +914,59 @@ SELECT a.month_start, a.provider, c.commitment_discount_name, c.commitment_disco
 FROM agg_commitment_utilization a
 INNER JOIN dim_commitment_discount c ON a.commitment_sk = c.commitment_sk;
 
+DROP VIEW IF EXISTS vw_pbi_rightsizing_resource_monthly;
+CREATE VIEW vw_pbi_rightsizing_resource_monthly AS
+SELECT
+  r.month_start, r.provider, r.prior_month_start,
+  r.resource_sk, res.name AS resource_name, res.resource_type,
+  r.service_sk, svc.service_name,
+  app.application_sk, app.application_name, r.environment,
+  r.prior_sku_sk, ps.sku_id AS prior_sku_id,
+  r.current_sku_sk, cs.sku_id AS current_sku_id,
+  r.prior_unit_rate, r.current_unit_rate, r.post_change_quantity,
+  r.realized_savings_unit, r.realized_savings_cost_delta, r.change_direction,
+  r.refreshed_utc
+FROM agg_resource_rightsizing_monthly r
+INNER JOIN dim_resource res ON r.resource_sk = res.resource_sk
+INNER JOIN dim_service svc ON r.service_sk = svc.service_sk
+INNER JOIN dim_application app ON r.application_sk = app.application_sk
+INNER JOIN dim_sku ps ON r.prior_sku_sk = ps.sku_sk
+INNER JOIN dim_sku cs ON r.current_sku_sk = cs.sku_sk;
+
+DROP VIEW IF EXISTS vw_pbi_rightsizing_intramonth;
+CREATE VIEW vw_pbi_rightsizing_intramonth AS
+SELECT
+  r.month_start, r.provider, r.change_date,
+  r.resource_sk, res.name AS resource_name,
+  r.service_sk, svc.service_name,
+  app.application_sk, app.application_name, r.environment,
+  r.prior_sku_sk, ps.sku_id AS prior_sku_id,
+  r.new_sku_sk, ns.sku_id AS new_sku_id,
+  r.days_on_prior_sku, r.days_on_new_sku,
+  r.realized_savings_unit, r.realized_savings_cost_delta, r.change_direction,
+  r.refreshed_utc
+FROM agg_resource_rightsizing_intramonth r
+INNER JOIN dim_resource res ON r.resource_sk = res.resource_sk
+INNER JOIN dim_service svc ON r.service_sk = svc.service_sk
+INNER JOIN dim_application app ON r.application_sk = app.application_sk
+INNER JOIN dim_sku ps ON r.prior_sku_sk = ps.sku_sk
+INNER JOIN dim_sku ns ON r.new_sku_sk = ns.sku_sk;
+
+DROP VIEW IF EXISTS vw_pbi_rightsizing_summary_monthly;
+CREATE VIEW vw_pbi_rightsizing_summary_monthly AS
+SELECT
+  a.month_start, a.provider, a.service_sk, svc.service_name,
+  a.total_realized_savings_unit, a.total_realized_savings_cost_delta,
+  a.mom_change_count, a.intramonth_change_count,
+  a.downsize_count, a.upsize_count, a.refreshed_utc
+FROM agg_rightsizing_summary_monthly a
+INNER JOIN dim_service svc ON a.service_sk = svc.service_sk;
+
 DROP VIEW IF EXISTS vw_pbi_savings_summary;
 CREATE VIEW vw_pbi_savings_summary AS
 SELECT a.month_start, a.provider, svc.service_name, a.total_effective_cost,
-  a.total_projected_savings, a.recommendation_count, a.refreshed_utc
+  a.total_projected_savings, a.recommendation_count,
+  a.total_realized_savings_unit, a.total_realized_savings_cost_delta,
+  a.rightsizing_change_count, a.refreshed_utc
 FROM agg_savings_summary a
 INNER JOIN dim_service svc ON a.service_sk = svc.service_sk;

@@ -12,6 +12,9 @@ IF OBJECT_ID(N'dbo.vw_pbi_cost_distribution_monthly', N'V') IS NOT NULL DROP VIE
 IF OBJECT_ID(N'dbo.vw_pbi_cost_anomaly_monthly', N'V') IS NOT NULL DROP VIEW dbo.vw_pbi_cost_anomaly_monthly;
 IF OBJECT_ID(N'dbo.vw_pbi_commitment_utilization', N'V') IS NOT NULL DROP VIEW dbo.vw_pbi_commitment_utilization;
 IF OBJECT_ID(N'dbo.vw_pbi_savings_summary', N'V') IS NOT NULL DROP VIEW dbo.vw_pbi_savings_summary;
+IF OBJECT_ID(N'dbo.vw_pbi_rightsizing_resource_monthly', N'V') IS NOT NULL DROP VIEW dbo.vw_pbi_rightsizing_resource_monthly;
+IF OBJECT_ID(N'dbo.vw_pbi_rightsizing_intramonth', N'V') IS NOT NULL DROP VIEW dbo.vw_pbi_rightsizing_intramonth;
+IF OBJECT_ID(N'dbo.vw_pbi_rightsizing_summary_monthly', N'V') IS NOT NULL DROP VIEW dbo.vw_pbi_rightsizing_summary_monthly;
 
 DECLARE @sql NVARCHAR(MAX) = N'';
 

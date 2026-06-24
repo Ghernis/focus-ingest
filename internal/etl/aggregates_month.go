@@ -46,6 +46,9 @@ func (p *Processor) rebuildAggregatesForMonth(ctx context.Context, tx *sql.Tx, m
 	if err := p.insertAppAggregatesForMonth(ctx, tx, month); err != nil {
 		return err
 	}
+	if err := p.rebuildRightsizingForMonth(ctx, tx, month); err != nil {
+		return err
+	}
 	if err := p.rebuildCostDistributionForMonth(ctx, tx, month); err != nil {
 		return err
 	}
@@ -77,6 +80,9 @@ func (p *Processor) deleteAggregatesForMonth(ctx context.Context, tx *sql.Tx, mo
 		{"agg_cost_by_tag", m},
 		{"agg_commitment_utilization", m},
 		{"agg_savings_summary", m},
+		{"agg_resource_rightsizing_monthly", m},
+		{"agg_resource_rightsizing_intramonth", m},
+		{"agg_rightsizing_summary_monthly", m},
 		{"agg_app_monthly", m},
 		{"agg_app_service_monthly", m},
 		{"agg_app_service_resource_monthly", m},
@@ -184,9 +190,9 @@ func (p *Processor) insertCoreAggregatesForMonth(ctx context.Context, tx *sql.Tx
 	}
 
 	savingsSQL := fmt.Sprintf(`
-		INSERT INTO agg_savings_summary (month_start, provider, service_sk, total_effective_cost, total_projected_savings, recommendation_count, refreshed_utc)
+		INSERT INTO agg_savings_summary (month_start, provider, service_sk, total_effective_cost, total_projected_savings, recommendation_count, total_realized_savings_unit, total_realized_savings_cost_delta, rightsizing_change_count, refreshed_utc)
 		SELECT %s, a.provider, f.service_sk,
-		  SUM(%s), 0, 0, %s
+		  SUM(%s), 0, 0, 0, 0, 0, %s
 		FROM fact_focus_cost_daily f
 		%s
 		WHERE f.sub_account_sk IS NOT NULL AND %s
