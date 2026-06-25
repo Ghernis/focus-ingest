@@ -5,6 +5,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/ghernis/focus_dt/internal/focus"
 )
 
 // skMaps holds local_sk -> server_sk remaps per dimension table.
@@ -131,10 +133,7 @@ func normalizeDateKey(v interface{}) string {
 	if s == "<nil>" {
 		return ""
 	}
-	if len(s) >= 10 && s[4] == '-' && s[7] == '-' {
-		return s[:10]
-	}
-	return s
+	return focus.DateOnly(s)
 }
 
 func truncateRunes(s string, max int) string {
@@ -176,6 +175,7 @@ const (
 	aggColInt
 	aggColIntNull
 	aggColDecimal
+	aggColDate
 )
 
 func coerceAggVals(vals []interface{}, kinds []aggColKind) {
@@ -210,6 +210,16 @@ func coerceAggVals(vals []interface{}, kinds []aggColKind) {
 				vals[i] = 0.0
 			} else {
 				vals[i] = f
+			}
+		case aggColDate:
+			if vals[i] == nil {
+				continue
+			}
+			s := normalizeDateKey(vals[i])
+			if s == "" {
+				vals[i] = nil
+			} else {
+				vals[i] = s
 			}
 		}
 	}
