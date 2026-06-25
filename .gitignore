@@ -1,1 +1,5 @@
 query_results.csv
+bin
+data
+*.exe
+focus_sample_*.csv
