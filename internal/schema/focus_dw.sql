@@ -1103,6 +1103,22 @@ BEGIN
 END
 GO
 
+IF COL_LENGTH('dbo.agg_resource_rightsizing_monthly', 'projected_annual_savings') IS NULL
+BEGIN
+  ALTER TABLE dbo.agg_resource_rightsizing_monthly ADD projected_annual_savings DECIMAL(28,10) NOT NULL
+    CONSTRAINT DF_agg_res_rightsizing_monthly_proj DEFAULT 0;
+  ALTER TABLE dbo.agg_resource_rightsizing_monthly DROP CONSTRAINT DF_agg_res_rightsizing_monthly_proj;
+END
+GO
+
+IF COL_LENGTH('dbo.agg_resource_rightsizing_intramonth', 'projected_annual_savings') IS NULL
+BEGIN
+  ALTER TABLE dbo.agg_resource_rightsizing_intramonth ADD projected_annual_savings DECIMAL(28,10) NOT NULL
+    CONSTRAINT DF_agg_res_rightsizing_intramonth_proj DEFAULT 0;
+  ALTER TABLE dbo.agg_resource_rightsizing_intramonth DROP CONSTRAINT DF_agg_res_rightsizing_intramonth_proj;
+END
+GO
+
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_resource_rightsizing_monthly_month' AND object_id = OBJECT_ID(N'dbo.agg_resource_rightsizing_monthly'))
 BEGIN
   CREATE INDEX IX_agg_resource_rightsizing_monthly_month

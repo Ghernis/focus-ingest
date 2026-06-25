@@ -163,7 +163,9 @@ func writeAggRows(ctx context.Context, tx *sql.Tx, spec aggPublishSpec, rows map
 	total := 0
 	prefix := fmt.Sprintf(`INSERT INTO %s (%s) VALUES `, spec.table, spec.serverCols)
 	for _, vals := range rows {
-		coerceAggVals(vals, spec.colKinds)
+		if err := coerceAggVals(vals, spec.colKinds); err != nil {
+			return total, fmt.Errorf("%s: %w; row={%s}", spec.table, err, formatAggRow(vals, spec.colKinds))
+		}
 		batch = append(batch, vals)
 		if len(batch) >= 200 {
 			if err := store.ExecSQLServerMultiInsert(ctx, tx, prefix, spec.colCount, batch); err != nil {

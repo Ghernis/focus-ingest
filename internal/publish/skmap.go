@@ -5,6 +5,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ghernis/focus_dt/internal/focus"
 )
@@ -176,12 +177,63 @@ const (
 	aggColIntNull
 	aggColDecimal
 	aggColDate
+	aggColDateTime
 )
 
-func coerceAggVals(vals []interface{}, kinds []aggColKind) {
+func coerceSQLDate(v interface{}) (time.Time, error) {
+	if v == nil {
+		return time.Time{}, fmt.Errorf("nil date")
+	}
+	switch t := v.(type) {
+	case time.Time:
+		return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC), nil
+	}
+	s := normalizeDateKey(v)
+	if s == "" {
+		return time.Time{}, fmt.Errorf("empty date from %#v", v)
+	}
+	parsed, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse date %q: %w", s, err)
+	}
+	return parsed, nil
+}
+
+func coerceSQLDateTime(v interface{}) (time.Time, error) {
+	if v == nil {
+		return time.Time{}, fmt.Errorf("nil datetime")
+	}
+	switch t := v.(type) {
+	case time.Time:
+		return t.UTC(), nil
+	}
+	s := strings.TrimSpace(fmt.Sprint(v))
+	if s == "" || s == "<nil>" {
+		return time.Time{}, fmt.Errorf("empty datetime")
+	}
+	lower := strings.ToLower(s)
+	if lower == "datetime('now')" || lower == `datetime("now")` || lower == "sysutcdatetime()" {
+		return time.Now().UTC(), nil
+	}
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02",
+	}
+	for _, layout := range layouts {
+		if parsed, err := time.Parse(layout, s); err == nil {
+			return parsed.UTC(), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("parse datetime %q", s)
+}
+
+func coerceAggVals(vals []interface{}, kinds []aggColKind) error {
 	for i, k := range kinds {
 		if i >= len(vals) {
-			return
+			return nil
 		}
 		switch k {
 		case aggColInt:
@@ -212,16 +264,42 @@ func coerceAggVals(vals []interface{}, kinds []aggColKind) {
 				vals[i] = f
 			}
 		case aggColDate:
-			if vals[i] == nil {
-				continue
+			dt, err := coerceSQLDate(vals[i])
+			if err != nil {
+				return fmt.Errorf("date column index %d: %w", i, err)
 			}
-			s := normalizeDateKey(vals[i])
-			if s == "" {
-				vals[i] = nil
-			} else {
-				vals[i] = s
+			vals[i] = dt
+		case aggColDateTime:
+			dt, err := coerceSQLDateTime(vals[i])
+			if err != nil {
+				return fmt.Errorf("datetime column index %d: %w", i, err)
 			}
+			vals[i] = dt
 		}
 	}
+	return nil
+}
+
+func formatAggRow(vals []interface{}, kinds []aggColKind) string {
+	parts := make([]string, 0, len(vals))
+	for i, v := range vals {
+		label := fmt.Sprintf("c%d", i)
+		if i < len(kinds) {
+			switch kinds[i] {
+			case aggColDate:
+				label += ":date"
+			case aggColDateTime:
+				label += ":dt"
+			case aggColDecimal:
+				label += ":dec"
+			case aggColInt, aggColIntNull:
+				label += ":int"
+			default:
+				label += ":str"
+			}
+		}
+		parts = append(parts, fmt.Sprintf("%s=%#v", label, v))
+	}
+	return strings.Join(parts, ", ")
 }
 

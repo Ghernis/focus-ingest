@@ -88,7 +88,9 @@ func publishFacts(ctx context.Context, local, server *sql.DB, month string, batc
 	var batch [][]interface{}
 	total := 0
 	for _, vals := range merged {
-		coerceAggVals(vals, factColKinds)
+		if err := coerceAggVals(vals, factColKinds); err != nil {
+			return 0, fmt.Errorf("facts: %w", err)
+		}
 		batch = append(batch, vals)
 		if len(batch) >= 100 {
 			if err := store.ExecSQLServerMultiInsert(ctx, tx, prefix, colCount, batch); err != nil {

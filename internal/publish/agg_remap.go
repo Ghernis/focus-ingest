@@ -149,7 +149,7 @@ func aggSpecs(month string) []aggPublishSpec {
 				aggColDate, aggColString, aggColInt, aggColInt, aggColInt, aggColString,
 				aggColDate, aggColInt, aggColInt,
 				aggColDecimal, aggColDecimal, aggColDecimal, aggColDecimal, aggColDecimal, aggColDecimal,
-				aggColString, aggColString,
+				aggColString, aggColDateTime,
 			},
 		},
 		{
@@ -168,7 +168,7 @@ func aggSpecs(month string) []aggPublishSpec {
 			colKinds: []aggColKind{
 				aggColDate, aggColString, aggColInt, aggColInt, aggColInt, aggColString,
 				aggColDate, aggColInt, aggColInt, aggColInt, aggColInt,
-				aggColDecimal, aggColDecimal, aggColDecimal, aggColString, aggColString,
+				aggColDecimal, aggColDecimal, aggColDecimal, aggColString, aggColDateTime,
 			},
 		},
 		{
@@ -185,8 +185,8 @@ func aggSpecs(month string) []aggPublishSpec {
 			sumIntCols: []int{5, 6, 7, 8},
 			skCols:     map[int]string{2: "dim_service"},
 			colKinds: []aggColKind{
-				aggColString, aggColString, aggColInt,
-				aggColDecimal, aggColDecimal, aggColInt, aggColInt, aggColInt, aggColInt, aggColString,
+				aggColDate, aggColString, aggColInt,
+				aggColDecimal, aggColDecimal, aggColInt, aggColInt, aggColInt, aggColInt, aggColDateTime,
 			},
 		},
 		{
@@ -306,7 +306,9 @@ func copyAggTableRemapped(ctx context.Context, local *sql.DB, serverTx *sql.Tx, 
 	total := 0
 	prefix := fmt.Sprintf(`INSERT INTO %s (%s) VALUES `, spec.table, spec.serverCols)
 	for _, vals := range merged {
-		coerceAggVals(vals, spec.colKinds)
+		if err := coerceAggVals(vals, spec.colKinds); err != nil {
+			return total, fmt.Errorf("%s: %w; row={%s}", spec.table, err, formatAggRow(vals, spec.colKinds))
+		}
 		batch = append(batch, vals)
 		if len(batch) >= 200 {
 			if err := store.ExecSQLServerMultiInsert(ctx, serverTx, prefix, spec.colCount, batch); err != nil {

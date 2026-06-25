@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strconv"
+	"time"
 )
 
 type distKey struct {
@@ -41,6 +42,12 @@ func (p *Processor) nowUTC() string {
 		return "SYSUTCDATETIME()"
 	}
 	return "datetime('now')"
+}
+
+// refreshedUTCParam returns a timestamp value for INSERT bind parameters.
+// nowUTC() is a SQL expression for generated SELECT statements only.
+func (p *Processor) refreshedUTCParam() time.Time {
+	return time.Now().UTC()
 }
 
 func (p *Processor) appContextJoins() string {

@@ -94,15 +94,15 @@ func (p *Processor) rebuildRightsizingForMonth(ctx context.Context, tx *sql.Tx, 
 	}
 
 	rollups := map[string]*serviceRightsizingRollup{}
-	now := p.nowUTC()
+	refreshed := p.refreshedUTCParam()
 
-	if err := p.insertMoMRightsizing(ctx, tx, month, priorBillingMonth(month), currentDominant, priorDominant, resourceTotals, skuAggs, rollups, now, skuKeys); err != nil {
+	if err := p.insertMoMRightsizing(ctx, tx, month, priorBillingMonth(month), currentDominant, priorDominant, resourceTotals, skuAggs, rollups, refreshed, skuKeys); err != nil {
 		return err
 	}
-	if err := p.insertIntraMonthRightsizing(ctx, tx, month, rollups, now, skuKeys); err != nil {
+	if err := p.insertIntraMonthRightsizing(ctx, tx, month, rollups, refreshed, skuKeys); err != nil {
 		return err
 	}
-	if err := p.insertRightsizingSummary(ctx, tx, month, rollups, now); err != nil {
+	if err := p.insertRightsizingSummary(ctx, tx, month, rollups, refreshed); err != nil {
 		return err
 	}
 	return p.updateSavingsSummaryRealized(ctx, tx, month, rollups)
@@ -300,7 +300,7 @@ func (p *Processor) insertMoMRightsizing(
 	resourceTotals map[string]map[int64]resourceMonthMeta,
 	skuAggs []skuMonthAgg,
 	rollups map[string]*serviceRightsizingRollup,
-	now string,
+	now interface{},
 	skuKeys map[int64]string,
 ) error {
 	insertSQL := `INSERT INTO agg_resource_rightsizing_monthly (
@@ -349,7 +349,7 @@ func (p *Processor) insertMoMRightsizing(
 	return nil
 }
 
-func (p *Processor) insertIntraMonthRightsizing(ctx context.Context, tx *sql.Tx, month string, rollups map[string]*serviceRightsizingRollup, now string, skuKeys map[int64]string) error {
+func (p *Processor) insertIntraMonthRightsizing(ctx context.Context, tx *sql.Tx, month string, rollups map[string]*serviceRightsizingRollup, now interface{}, skuKeys map[int64]string) error {
 	daily, metaByResource, err := p.loadDailyResourceSkuAggs(ctx, tx, month)
 	if err != nil {
 		return err
@@ -575,7 +575,7 @@ func (p *Processor) loadDailyResourceSkuAggs(ctx context.Context, tx *sql.Tx, mo
 	return out, meta, rows.Err()
 }
 
-func (p *Processor) insertRightsizingSummary(ctx context.Context, tx *sql.Tx, month string, rollups map[string]*serviceRightsizingRollup, now string) error {
+func (p *Processor) insertRightsizingSummary(ctx context.Context, tx *sql.Tx, month string, rollups map[string]*serviceRightsizingRollup, now interface{}) error {
 	insertSQL := `INSERT INTO agg_rightsizing_summary_monthly (
 		month_start, provider, service_sk,
 		total_realized_savings_unit, total_realized_savings_cost_delta,
@@ -673,7 +673,7 @@ func (p *Processor) updateSavingsSummaryRealized(ctx context.Context, tx *sql.Tx
 			) VALUES (?, ?, ?, 0, 0, 0, ?, ?, ?, ?)`
 			if _, err := tx.ExecContext(ctx, p.q(insertSQL),
 				month, parts[0], serviceSK,
-				formatCost(r.unitSavings), formatCost(r.costDelta), changeCount, p.nowUTC(),
+				formatCost(r.unitSavings), formatCost(r.costDelta), changeCount, p.refreshedUTCParam(),
 			); err != nil {
 				return err
 			}
