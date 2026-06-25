@@ -9,8 +9,7 @@ permissions:
 
 jobs:
   build:
-    #runs-on: ubuntu-latest
-    runs-on: DevOps_YPF
+    runs-on: ubuntu-latest
 
     steps:
     - name: Checkout code
