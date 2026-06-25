@@ -1103,19 +1103,12 @@ BEGIN
 END
 GO
 
-IF COL_LENGTH('dbo.agg_resource_rightsizing_monthly', 'projected_annual_savings') IS NULL
+IF OBJECT_ID(N'dbo.agg_resource_rightsizing_monthly', N'U') IS NOT NULL
+  AND COL_LENGTH('dbo.agg_resource_rightsizing_monthly', 'projected_annual_savings') IS NULL
 BEGIN
   ALTER TABLE dbo.agg_resource_rightsizing_monthly ADD projected_annual_savings DECIMAL(28,10) NOT NULL
     CONSTRAINT DF_agg_res_rightsizing_monthly_proj DEFAULT 0;
   ALTER TABLE dbo.agg_resource_rightsizing_monthly DROP CONSTRAINT DF_agg_res_rightsizing_monthly_proj;
-END
-GO
-
-IF COL_LENGTH('dbo.agg_resource_rightsizing_intramonth', 'projected_annual_savings') IS NULL
-BEGIN
-  ALTER TABLE dbo.agg_resource_rightsizing_intramonth ADD projected_annual_savings DECIMAL(28,10) NOT NULL
-    CONSTRAINT DF_agg_res_rightsizing_intramonth_proj DEFAULT 0;
-  ALTER TABLE dbo.agg_resource_rightsizing_intramonth DROP CONSTRAINT DF_agg_res_rightsizing_intramonth_proj;
 END
 GO
 
@@ -1148,6 +1141,15 @@ BEGIN
     refreshed_utc                          DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
     UNIQUE (month_start, provider, resource_sk, service_sk, change_date, new_sku_sk)
   );
+END
+GO
+
+IF OBJECT_ID(N'dbo.agg_resource_rightsizing_intramonth', N'U') IS NOT NULL
+  AND COL_LENGTH('dbo.agg_resource_rightsizing_intramonth', 'projected_annual_savings') IS NULL
+BEGIN
+  ALTER TABLE dbo.agg_resource_rightsizing_intramonth ADD projected_annual_savings DECIMAL(28,10) NOT NULL
+    CONSTRAINT DF_agg_res_rightsizing_intramonth_proj DEFAULT 0;
+  ALTER TABLE dbo.agg_resource_rightsizing_intramonth DROP CONSTRAINT DF_agg_res_rightsizing_intramonth_proj;
 END
 GO
 
