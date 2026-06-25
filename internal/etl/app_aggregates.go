@@ -46,8 +46,12 @@ func (p *Processor) nowUTC() string {
 
 // refreshedUTCParam returns a timestamp value for INSERT bind parameters.
 // nowUTC() is a SQL expression for generated SELECT statements only.
-func (p *Processor) refreshedUTCParam() time.Time {
-	return time.Now().UTC()
+func (p *Processor) refreshedUTCParam() interface{} {
+	t := time.Now().UTC()
+	if p.Dialect == "sqlserver" {
+		return t
+	}
+	return t.Format("2006-01-02 15:04:05")
 }
 
 func (p *Processor) appContextJoins() string {

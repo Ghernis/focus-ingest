@@ -206,6 +206,13 @@ func coerceSQLDateTime(v interface{}) (time.Time, error) {
 	switch t := v.(type) {
 	case time.Time:
 		return t.UTC(), nil
+	case *time.Time:
+		if t == nil {
+			return time.Time{}, fmt.Errorf("nil datetime")
+		}
+		return t.UTC(), nil
+	case []byte:
+		v = string(t)
 	}
 	s := strings.TrimSpace(fmt.Sprint(v))
 	if s == "" || s == "<nil>" {
@@ -218,8 +225,10 @@ func coerceSQLDateTime(v interface{}) (time.Time, error) {
 	layouts := []string{
 		time.RFC3339Nano,
 		time.RFC3339,
-		"2006-01-02 15:04:05",
+		"2006-01-02 15:04:05.999999999 -0700 MST", // time.Time.String() from SQLite TEXT / fmt.Sprint
+		"2006-01-02 15:04:05 -0700 MST",
 		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
 		"2006-01-02",
 	}
 	for _, layout := range layouts {

@@ -35,6 +35,17 @@ func TestCoerceSQLDateTimeLegacyPlaceholder(t *testing.T) {
 	}
 }
 
+func TestCoerceSQLDateTimeGoStringFormat(t *testing.T) {
+	in := "2026-06-25 18:17:28.6970829 +0000 UTC"
+	dt, err := coerceSQLDateTime(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dt.Year() != 2026 || dt.Month() != time.June || dt.Day() != 25 {
+		t.Fatalf("unexpected date: %v", dt)
+	}
+}
+
 func TestCoerceAggValsRightsizingIntramonthRow(t *testing.T) {
 	vals := []interface{}{
 		"2026-01-01T00:00:00Z",
