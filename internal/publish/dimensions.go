@@ -184,22 +184,27 @@ func mergeRegion(ctx context.Context, local, server *sql.DB, p pendingDim) (int6
 
 func mergeSKU(ctx context.Context, local, server *sql.DB, p pendingDim) (int64, error) {
 	parts := strings.SplitN(p.NaturalKey, "|", 3)
-	var meter, details, svc sql.NullString
-	err := local.QueryRowContext(ctx, `SELECT sku_meter, sku_price_details, service_name FROM dim_sku WHERE sku_sk = ?`, p.LocalSK).
-		Scan(&meter, &details, &svc)
+	var meter, details, svc, tierCode sql.NullString
+	var tierRank sql.NullInt32
+	var isTierMeter int
+	err := local.QueryRowContext(ctx, `SELECT sku_meter, sku_price_details, service_name, tier_code, tier_rank, is_tier_meter FROM dim_sku WHERE sku_sk = ?`, p.LocalSK).
+		Scan(&meter, &details, &svc, &tierCode, &tierRank, &isTierMeter)
 	if err != nil {
 		return 0, err
 	}
 	_, err = server.ExecContext(ctx, `
-		MERGE dim_sku AS t USING (SELECT @p1 provider, @p2 sku_id, @p3 sku_price_id, @p4 sku_meter, @p5 sku_price_details, @p6 service_name) s
+		MERGE dim_sku AS t USING (SELECT @p1 provider, @p2 sku_id, @p3 sku_price_id, @p4 sku_meter, @p5 sku_price_details, @p6 service_name, @p7 tier_code, @p8 tier_rank, @p9 is_tier_meter) s
 		ON t.provider = s.provider AND t.sku_id = s.sku_id AND ISNULL(t.sku_price_id,'') = ISNULL(s.sku_price_id,'')
 		WHEN MATCHED THEN UPDATE SET
 		  sku_meter = COALESCE(s.sku_meter, t.sku_meter),
 		  sku_price_details = COALESCE(s.sku_price_details, t.sku_price_details),
-		  service_name = COALESCE(s.service_name, t.service_name)
-		WHEN NOT MATCHED THEN INSERT (provider, sku_id, sku_price_id, sku_meter, sku_price_details, service_name)
-		  VALUES (s.provider, s.sku_id, s.sku_price_id, s.sku_meter, s.sku_price_details, s.service_name);`,
-		parts[0], parts[1], emptyToNil(parts[2]), nullIface(meter), nullIface(details), nullIface(svc))
+		  service_name = COALESCE(s.service_name, t.service_name),
+		  tier_code = s.tier_code,
+		  tier_rank = s.tier_rank,
+		  is_tier_meter = s.is_tier_meter
+		WHEN NOT MATCHED THEN INSERT (provider, sku_id, sku_price_id, sku_meter, sku_price_details, service_name, tier_code, tier_rank, is_tier_meter)
+		  VALUES (s.provider, s.sku_id, s.sku_price_id, s.sku_meter, s.sku_price_details, s.service_name, s.tier_code, s.tier_rank, s.is_tier_meter);`,
+		parts[0], parts[1], emptyToNil(parts[2]), nullIface(meter), nullIface(details), nullIface(svc), nullIface(tierCode), nullIfaceInt32(tierRank), isTierMeter)
 	if err != nil {
 		return 0, err
 	}
@@ -358,6 +363,13 @@ func nullIface(s sql.NullString) interface{} {
 func nullIfaceInt(n sql.NullInt64) interface{} {
 	if n.Valid {
 		return n.Int64
+	}
+	return nil
+}
+
+func nullIfaceInt32(n sql.NullInt32) interface{} {
+	if n.Valid {
+		return n.Int32
 	}
 	return nil
 }

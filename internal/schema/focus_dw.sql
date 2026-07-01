@@ -108,10 +108,15 @@ IF COL_LENGTH('dbo.dim_sku', 'tier_rank') IS NULL
   ALTER TABLE dbo.dim_sku ADD tier_rank INT NULL;
 GO
 IF COL_LENGTH('dbo.dim_sku', 'is_tier_meter') IS NULL
-BEGIN
   ALTER TABLE dbo.dim_sku ADD is_tier_meter BIT NOT NULL CONSTRAINT DF_dim_sku_is_tier_meter DEFAULT 0;
-  ALTER TABLE dbo.dim_sku DROP CONSTRAINT DF_dim_sku_is_tier_meter;
-END
+GO
+IF COL_LENGTH('dbo.dim_sku', 'is_tier_meter') IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM sys.default_constraints dc
+    INNER JOIN sys.columns c ON dc.parent_object_id = c.object_id AND dc.parent_column_id = c.column_id
+    WHERE dc.parent_object_id = OBJECT_ID(N'dbo.dim_sku') AND c.name = N'is_tier_meter'
+  )
+  ALTER TABLE dbo.dim_sku ADD CONSTRAINT DF_dim_sku_is_tier_meter DEFAULT 0 FOR is_tier_meter;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.dim_tier_rule') AND type = N'U')

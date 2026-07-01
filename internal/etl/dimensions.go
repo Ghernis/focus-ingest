@@ -269,8 +269,8 @@ func (p *Processor) upsertSKU(ctx context.Context, tx *sql.Tx, r normRow) error 
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO dim_sku (provider, sku_id, sku_price_id, sku_meter, sku_price_details, service_name)
-			VALUES (?, ?, ?, ?, ?, ?)
+			INSERT INTO dim_sku (provider, sku_id, sku_price_id, sku_meter, sku_price_details, service_name, is_tier_meter)
+			VALUES (?, ?, ?, ?, ?, ?, 0)
 			ON CONFLICT(provider, sku_id, sku_price_id) DO UPDATE SET
 			  sku_meter = COALESCE(excluded.sku_meter, dim_sku.sku_meter),
 			  sku_price_details = COALESCE(excluded.sku_price_details, dim_sku.sku_price_details),
@@ -300,8 +300,8 @@ func (p *Processor) upsertSKU(ctx context.Context, tx *sql.Tx, r normRow) error 
 		  sku_meter = COALESCE(s.sku_meter, t.sku_meter),
 		  sku_price_details = COALESCE(s.sku_price_details, t.sku_price_details),
 		  service_name = COALESCE(s.service_name, t.service_name)
-		WHEN NOT MATCHED THEN INSERT (provider, sku_id, sku_price_id, sku_meter, sku_price_details, service_name)
-		  VALUES (s.provider, s.sku_id, s.sku_price_id, s.sku_meter, s.sku_price_details, s.service_name);`,
+		WHEN NOT MATCHED THEN INSERT (provider, sku_id, sku_price_id, sku_meter, sku_price_details, service_name, is_tier_meter)
+		  VALUES (s.provider, s.sku_id, s.sku_price_id, s.sku_meter, s.sku_price_details, s.service_name, 0);`,
 		r.ProviderCode, focus.PtrStr(r.SkuId), focus.PtrStr(r.SkuPriceId), nullStr(r.SkuMeter), nullStr(r.SkuPriceDetails), nullStr(r.ServiceName))
 	if err != nil {
 		return err
