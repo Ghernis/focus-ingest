@@ -50,12 +50,12 @@ func (p *Processor) enrichAllSkuTiers(ctx context.Context, tx *sql.Tx) error {
 
 	for rows.Next() {
 		var sk int64
-		var provider, serviceName string
-		var skuPriceID, skuMeter sql.NullString
+		var provider string
+		var serviceName, skuPriceID, skuMeter sql.NullString
 		if err := rows.Scan(&sk, &provider, &serviceName, &skuPriceID, &skuMeter); err != nil {
 			return err
 		}
-		match, ok := engine.matchSKU(provider, serviceName, skuPriceID.String, skuMeter.String)
+		match, ok := engine.matchSKU(provider, serviceName.String, skuPriceID.String, skuMeter.String)
 		if !ok {
 			if _, err := tx.ExecContext(ctx, p.q(updateSQL), nil, nil, 0, sk); err != nil {
 				return fmt.Errorf("sku_sk %d: %w", sk, err)
