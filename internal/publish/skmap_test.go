@@ -83,3 +83,38 @@ func TestCoerceAggValsRightsizingIntramonthRow(t *testing.T) {
 		t.Fatalf("refreshed_utc type %T", vals[15])
 	}
 }
+
+func TestCoerceAggValsCostDailyRow(t *testing.T) {
+	vals := []interface{}{
+		"2026-01-15T00:00:00Z",
+		"2026-01-01",
+		"AZURE",
+		int64(1),
+		int64(2),
+		nil,
+		"100.00",
+		"90.00",
+		"110.00",
+		"95.00",
+		int64(42),
+		"2026-06-25 18:17:28.6970829 +0000 UTC",
+	}
+	kinds := []aggColKind{
+		aggColDate, aggColDate, aggColString,
+		aggColInt, aggColInt, aggColIntNull,
+		aggColDecimal, aggColDecimal, aggColDecimal, aggColDecimal,
+		aggColInt, aggColDateTime,
+	}
+	if err := coerceAggVals(vals, kinds); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := vals[0].(time.Time); !ok {
+		t.Fatalf("charge_date type %T", vals[0])
+	}
+	if _, ok := vals[1].(time.Time); !ok {
+		t.Fatalf("billing_period_start type %T", vals[1])
+	}
+	if _, ok := vals[11].(time.Time); !ok {
+		t.Fatalf("refreshed_utc type %T", vals[11])
+	}
+}

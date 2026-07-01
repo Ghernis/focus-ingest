@@ -21,6 +21,24 @@ func TestTierRules_VirtualMachineMeter(t *testing.T) {
 	}
 }
 
+func TestTierRules_AzureReservationsVM(t *testing.T) {
+	resetTierRulesEngine()
+	engine, err := loadTierRulesEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	match, ok := engine.matchSKU("AZURE", "Azure Reservations", "DZH318Z08M9W_01X3_1 Compute Hour", "D4s v5")
+	if !ok {
+		t.Fatal("expected Azure Reservations VM tier match")
+	}
+	if match.TierCode != "D4s v5" {
+		t.Fatalf("tier_code=%q", match.TierCode)
+	}
+	if match.TierRank <= 0 {
+		t.Fatalf("tier_rank=%d", match.TierRank)
+	}
+}
+
 func TestTierRules_SameSkuIdDifferentMeter(t *testing.T) {
 	engine, err := loadTierRulesEngine()
 	if err != nil {

@@ -36,10 +36,10 @@ func aggSpecs(month string) []aggPublishSpec {
 			sumIntCols: []int{10},
 			skCols:     map[int]string{3: "dim_sub_account", 4: "dim_service", 5: "dim_region"},
 			colKinds: []aggColKind{
-				aggColString, aggColString, aggColString,
+				aggColDate, aggColDate, aggColString,
 				aggColInt, aggColInt, aggColIntNull,
 				aggColDecimal, aggColDecimal, aggColDecimal, aggColDecimal,
-				aggColInt, aggColString,
+				aggColInt, aggColDateTime,
 			},
 		},
 		{
@@ -56,8 +56,8 @@ func aggSpecs(month string) []aggPublishSpec {
 			sumIntCols: []int{7},
 			skCols:     map[int]string{3: "dim_commitment_discount"},
 			colKinds: []aggColKind{
-				aggColString, aggColString, aggColString, aggColInt, aggColString,
-				aggColDecimal, aggColDecimal, aggColInt, aggColString,
+				aggColDate, aggColDate, aggColString, aggColInt, aggColString,
+				aggColDecimal, aggColDecimal, aggColInt, aggColDateTime,
 			},
 		},
 		{
@@ -75,9 +75,9 @@ func aggSpecs(month string) []aggPublishSpec {
 			sumIntCols: []int{9},
 			skCols:     map[int]string{2: "dim_sub_account"},
 			colKinds: []aggColKind{
-				aggColString, aggColString, aggColInt, aggColString, aggColInt,
+				aggColDate, aggColString, aggColInt, aggColString, aggColInt,
 				aggColDecimal, aggColDecimal, aggColDecimal, aggColDecimal,
-				aggColInt, aggColString,
+				aggColInt, aggColDateTime,
 			},
 		},
 		{
@@ -93,8 +93,8 @@ func aggSpecs(month string) []aggPublishSpec {
 			sumDecCols: []int{4, 5},
 			sumIntCols: []int{6},
 			colKinds: []aggColKind{
-				aggColString, aggColString, aggColString, aggColString,
-				aggColDecimal, aggColDecimal, aggColInt, aggColString,
+				aggColDate, aggColString, aggColString, aggColString,
+				aggColDecimal, aggColDecimal, aggColInt, aggColDateTime,
 			},
 		},
 		{
@@ -111,8 +111,8 @@ func aggSpecs(month string) []aggPublishSpec {
 			sumIntCols: []int{6},
 			skCols:     map[int]string{2: "dim_commitment_discount"},
 			colKinds: []aggColKind{
-				aggColString, aggColString, aggColInt, aggColString,
-				aggColDecimal, aggColDecimal, aggColInt, aggColString,
+				aggColDate, aggColString, aggColInt, aggColString,
+				aggColDecimal, aggColDecimal, aggColInt, aggColDateTime,
 			},
 		},
 		{
@@ -129,8 +129,8 @@ func aggSpecs(month string) []aggPublishSpec {
 			sumIntCols: []int{5, 8},
 			skCols:     map[int]string{2: "dim_service"},
 			colKinds: []aggColKind{
-				aggColString, aggColString, aggColInt,
-				aggColDecimal, aggColDecimal, aggColInt, aggColDecimal, aggColDecimal, aggColInt, aggColString,
+				aggColDate, aggColString, aggColInt,
+				aggColDecimal, aggColDecimal, aggColInt, aggColDecimal, aggColDecimal, aggColInt, aggColDateTime,
 			},
 		},
 		{
@@ -204,8 +204,8 @@ func aggSpecs(month string) []aggPublishSpec {
 			sumIntCols: []int{6},
 			skCols:     map[int]string{2: "dim_application"},
 			colKinds: []aggColKind{
-				aggColString, aggColString, aggColInt, aggColString,
-				aggColDecimal, aggColDecimal, aggColInt, aggColString,
+				aggColDate, aggColString, aggColInt, aggColString,
+				aggColDecimal, aggColDecimal, aggColInt, aggColDateTime,
 			},
 		},
 		{
@@ -222,8 +222,8 @@ func aggSpecs(month string) []aggPublishSpec {
 			sumIntCols: []int{7},
 			skCols:     map[int]string{2: "dim_application", 4: "dim_service"},
 			colKinds: []aggColKind{
-				aggColString, aggColString, aggColInt, aggColString, aggColInt,
-				aggColDecimal, aggColDecimal, aggColInt, aggColString,
+				aggColDate, aggColString, aggColInt, aggColString, aggColInt,
+				aggColDecimal, aggColDecimal, aggColInt, aggColDateTime,
 			},
 		},
 		{
@@ -240,8 +240,8 @@ func aggSpecs(month string) []aggPublishSpec {
 			sumIntCols: []int{8},
 			skCols:     map[int]string{2: "dim_application", 4: "dim_service", 5: "dim_resource"},
 			colKinds: []aggColKind{
-				aggColString, aggColString, aggColInt, aggColString, aggColInt, aggColInt,
-				aggColDecimal, aggColDecimal, aggColInt, aggColString,
+				aggColDate, aggColString, aggColInt, aggColString, aggColInt, aggColInt,
+				aggColDecimal, aggColDecimal, aggColInt, aggColDateTime,
 			},
 		},
 		{
@@ -257,12 +257,12 @@ func aggSpecs(month string) []aggPublishSpec {
 			grainCols:  []int{0, 1, 2, 3},
 			grainNorms: []grainNorm{grainNormDate, grainNormFold, grainNormFold, grainNormFold},
 			colKinds: []aggColKind{
-				aggColString, aggColString, aggColString, aggColString,
+				aggColDate, aggColString, aggColString, aggColString,
 				aggColInt,
 				aggColDecimal, aggColDecimal, aggColDecimal, aggColDecimal,
 				aggColDecimal, aggColDecimal, aggColDecimal, aggColDecimal,
 				aggColDecimal, aggColDecimal, aggColDecimal, aggColDecimal,
-				aggColDecimal, aggColDecimal, aggColString,
+				aggColDecimal, aggColDecimal, aggColDateTime,
 			},
 		},
 	}

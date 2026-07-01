@@ -33,6 +33,9 @@ func (p *Processor) enrichSkuTier(ctx context.Context, tx *sql.Tx, provider, sku
 }
 
 func (p *Processor) enrichAllSkuTiers(ctx context.Context, tx *sql.Tx) error {
+	if err := p.backfillSkuServiceNames(ctx, tx); err != nil {
+		return fmt.Errorf("backfill sku service names: %w", err)
+	}
 	engine, err := loadTierRulesEngine()
 	if err != nil {
 		return err
@@ -67,4 +70,35 @@ func (p *Processor) enrichAllSkuTiers(ctx context.Context, tx *sql.Tx) error {
 		}
 	}
 	return rows.Err()
+}
+
+func (p *Processor) backfillSkuServiceNames(ctx context.Context, tx *sql.Tx) error {
+	if p.Dialect == "sqlserver" {
+		_, err := tx.ExecContext(ctx, `
+			UPDATE s SET service_name = d.service_name
+			FROM dim_sku s
+			INNER JOIN (
+				SELECT f.sku_sk, svc.service_name,
+					ROW_NUMBER() OVER (PARTITION BY f.sku_sk ORDER BY COUNT(*) DESC, svc.service_name) AS rn
+				FROM fact_focus_cost_daily f
+				INNER JOIN dim_service svc ON f.service_sk = svc.service_sk
+				WHERE svc.service_name IS NOT NULL AND LTRIM(RTRIM(svc.service_name)) <> ''
+				GROUP BY f.sku_sk, svc.service_name
+			) d ON s.sku_sk = d.sku_sk AND d.rn = 1
+			WHERE s.service_name IS NULL OR LTRIM(RTRIM(s.service_name)) = ''`)
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `
+		UPDATE dim_sku SET service_name = (
+			SELECT svc.service_name
+			FROM fact_focus_cost_daily f
+			INNER JOIN dim_service svc ON f.service_sk = svc.service_sk
+			WHERE f.sku_sk = dim_sku.sku_sk
+			  AND svc.service_name IS NOT NULL AND TRIM(svc.service_name) <> ''
+			GROUP BY svc.service_name
+			ORDER BY COUNT(*) DESC, svc.service_name
+			LIMIT 1
+		)
+		WHERE service_name IS NULL OR TRIM(service_name) = ''`)
+	return err
 }

@@ -108,7 +108,6 @@ func tierRankKey(provider, serviceName, tierCode string) string {
 }
 
 func (e *tierRulesEngine) matchSKU(provider, serviceName, skuPriceID, skuMeter string) (skuTierMatch, bool) {
-	lineText := strings.TrimSpace(skuPriceID)
 	for _, rule := range e.rules {
 		if !strings.EqualFold(rule.Provider, provider) {
 			continue
@@ -116,7 +115,7 @@ func (e *tierRulesEngine) matchSKU(provider, serviceName, skuPriceID, skuMeter s
 		if strings.TrimSpace(rule.ServiceName) != strings.TrimSpace(serviceName) {
 			continue
 		}
-		if !rule.lineMatch.MatchString(lineText) {
+		if !ruleMatchesLine(rule, skuPriceID, skuMeter) {
 			continue
 		}
 		meter := strings.TrimSpace(skuMeter)
@@ -137,9 +136,41 @@ func (e *tierRulesEngine) matchSKU(provider, serviceName, skuPriceID, skuMeter s
 	return skuTierMatch{}, false
 }
 
+func ruleMatchesLine(rule compiledTierRule, skuPriceID, skuMeter string) bool {
+	price := strings.TrimSpace(skuPriceID)
+	meter := strings.TrimSpace(skuMeter)
+	candidates := []string{price}
+	if meter != "" {
+		combined := strings.TrimSpace(price + " " + meter)
+		if combined != price {
+			candidates = append(candidates, combined)
+		}
+	}
+	for _, lineText := range candidates {
+		if rule.lineMatch.MatchString(lineText) {
+			return true
+		}
+	}
+	return false
+}
+
+func rankLookupServices(serviceName string) []string {
+	s := strings.TrimSpace(serviceName)
+	switch s {
+	case "Azure Reservations":
+		return []string{s, "Virtual Machines", "Azure App Service"}
+	case "Virtual Machine Scale Sets":
+		return []string{s, "Virtual Machines"}
+	default:
+		return []string{s}
+	}
+}
+
 func (e *tierRulesEngine) tierRank(rule compiledTierRule, tierCode string) int {
-	if rank, ok := e.rankLookup[tierRankKey(rule.Provider, rule.ServiceName, tierCode)]; ok {
-		return rank
+	for _, svc := range rankLookupServices(rule.ServiceName) {
+		if rank, ok := e.rankLookup[tierRankKey(rule.Provider, svc, tierCode)]; ok {
+			return rank
+		}
 	}
 	switch rule.TierRankMode {
 	case tierRankVCoreCount:

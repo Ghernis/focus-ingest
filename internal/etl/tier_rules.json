@@ -10,11 +10,35 @@
     },
     {
       "provider": "AZURE",
+      "service_name": "Azure Reservations",
+      "line_match_regex": "Compute Hour",
+      "tier_extract_regex": "^([A-Z]\\d+[a-z]*s?\\s*v\\d+)$",
+      "tier_rank_mode": "numeric_suffix",
+      "priority": 11
+    },
+    {
+      "provider": "AZURE",
+      "service_name": "Virtual Machine Scale Sets",
+      "line_match_regex": "Compute Hour",
+      "tier_extract_regex": "^([A-Z]\\d+[a-z]*s?\\s*v\\d+)$",
+      "tier_rank_mode": "numeric_suffix",
+      "priority": 12
+    },
+    {
+      "provider": "AZURE",
       "service_name": "Azure App Service",
       "line_match_regex": "App Service Hour",
       "tier_extract_regex": "^([A-Z][A-Za-z0-9]+(?:\\s+v\\d+)?\\s+App|[A-Z]\\d+[A-Za-z]*)$",
       "tier_rank_mode": "lookup",
       "priority": 20
+    },
+    {
+      "provider": "AZURE",
+      "service_name": "Azure Reservations",
+      "line_match_regex": "App Service Hour",
+      "tier_extract_regex": "^([A-Z][A-Za-z0-9]+(?:\\s+v\\d+)?\\s+App|[A-Z]\\d+[A-Za-z]*)$",
+      "tier_rank_mode": "lookup",
+      "priority": 21
     },
     {
       "provider": "AZURE",
