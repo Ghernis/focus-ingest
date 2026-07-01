@@ -2,14 +2,14 @@ package etl
 
 import "testing"
 
-func TestDominantSkuByResourceMonth(t *testing.T) {
-	aggs := []skuMonthAgg{
-		{month: "2024-01-01", resourceSK: 1, skuSK: 10, skuCost: 90, skuQty: 9},
-		{month: "2024-01-01", resourceSK: 1, skuSK: 20, skuCost: 10, skuQty: 1},
+func TestPickDominantTierDaily(t *testing.T) {
+	byTier := map[tierDayTierKey]tierDailyRow{
+		{tierDayKey: tierDayKey{chargeDate: "2024-01-01", billingMonth: "2024-01-01", provider: "AZURE", resourceSK: 1, serviceSK: 1}, tierCode: "D4s v5", tierSkuSK: 10}: {tierCost: 90, tierQty: 9, tierCode: "D4s v5"},
+		{tierDayKey: tierDayKey{chargeDate: "2024-01-01", billingMonth: "2024-01-01", provider: "AZURE", resourceSK: 1, serviceSK: 1}, tierCode: "D2s v5", tierSkuSK: 20}: {tierCost: 10, tierQty: 1, tierCode: "D2s v5"},
 	}
-	dom := dominantSkuByResourceMonth(aggs, "2024-01-01")
-	if dom[1].skuSK != 10 {
-		t.Fatalf("dominant sku=%d want 10", dom[1].skuSK)
+	dom := pickDominantTierDaily(byTier)
+	if len(dom) != 1 || dom[0].tierCode != "D4s v5" {
+		t.Fatalf("dominant=%+v", dom)
 	}
 }
 
@@ -25,17 +25,16 @@ func TestChangeDirection(t *testing.T) {
 	}
 }
 
-func TestDetectIntraMonthChanges(t *testing.T) {
-	keys := map[int64]string{1: "AWS|SKU-LARGE", 2: "AWS|SKU-SMALL"}
-	days := []dailySkuAgg{
-		{chargeDate: "2024-03-10", skuSK: 1, serviceSK: 1, cost: 100, qty: 10},
-		{chargeDate: "2024-03-20", skuSK: 2, serviceSK: 1, cost: 40, qty: 10},
+func TestDetectIntraMonthTierChanges(t *testing.T) {
+	daily := []tierDailyRow{
+		{chargeDate: "2024-03-10", billingMonth: "2024-03-01", provider: "AZURE", resourceSK: 1, serviceSK: 1, tierCode: "D4s v5", tierRank: 680404, tierSkuSK: 1, tierUnitRate: 10, tierCost: 100, tierQty: 10},
+		{chargeDate: "2024-03-20", billingMonth: "2024-03-01", provider: "AZURE", resourceSK: 1, serviceSK: 1, tierCode: "D2s v5", tierRank: 680204, tierSkuSK: 2, tierUnitRate: 4, tierCost: 40, tierQty: 10},
 	}
-	events := detectIntraMonthChanges(days, keys)
+	events := detectIntraMonthTierChanges(daily)
 	if len(events) != 1 {
 		t.Fatalf("events=%d", len(events))
 	}
-	if events[0].changeDate != "2024-03-20" || events[0].priorSKU != 1 || events[0].newSKU != 2 {
+	if events[0].changeDate != "2024-03-20" || events[0].priorTierCode != "D4s v5" || events[0].newTierCode != "D2s v5" {
 		t.Fatalf("unexpected event: %+v", events[0])
 	}
 }

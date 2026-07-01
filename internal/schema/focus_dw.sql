@@ -101,6 +101,47 @@ BEGIN
 END
 GO
 
+IF COL_LENGTH('dbo.dim_sku', 'tier_code') IS NULL
+  ALTER TABLE dbo.dim_sku ADD tier_code VARCHAR(128) NULL;
+GO
+IF COL_LENGTH('dbo.dim_sku', 'tier_rank') IS NULL
+  ALTER TABLE dbo.dim_sku ADD tier_rank INT NULL;
+GO
+IF COL_LENGTH('dbo.dim_sku', 'is_tier_meter') IS NULL
+BEGIN
+  ALTER TABLE dbo.dim_sku ADD is_tier_meter BIT NOT NULL CONSTRAINT DF_dim_sku_is_tier_meter DEFAULT 0;
+  ALTER TABLE dbo.dim_sku DROP CONSTRAINT DF_dim_sku_is_tier_meter;
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.dim_tier_rule') AND type = N'U')
+BEGIN
+  CREATE TABLE dbo.dim_tier_rule (
+    tier_rule_sk       INT IDENTITY(1,1) PRIMARY KEY,
+    provider           VARCHAR(10) NOT NULL,
+    service_name       VARCHAR(256) NOT NULL,
+    line_match_regex   VARCHAR(512) NOT NULL,
+    tier_extract_regex VARCHAR(512) NOT NULL,
+    tier_rank_mode     VARCHAR(32) NOT NULL,
+    priority           INT NOT NULL DEFAULT 100,
+    UNIQUE (provider, service_name, priority)
+  );
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.dim_tier_rank') AND type = N'U')
+BEGIN
+  CREATE TABLE dbo.dim_tier_rank (
+    tier_rank_sk INT IDENTITY(1,1) PRIMARY KEY,
+    provider     VARCHAR(10) NOT NULL,
+    service_name VARCHAR(256) NOT NULL,
+    tier_code    VARCHAR(128) NOT NULL,
+    tier_rank    INT NOT NULL,
+    UNIQUE (provider, service_name, tier_code)
+  );
+END
+GO
+
 IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.dim_charge_category') AND type = N'U')
 BEGIN
   CREATE TABLE dbo.dim_charge_category (
@@ -1077,10 +1118,78 @@ BEGIN
 END
 GO
 
-IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.agg_resource_rightsizing_monthly') AND type = N'U')
+IF OBJECT_ID(N'dbo.vw_pbi_rightsizing_resource_monthly', N'V') IS NOT NULL DROP VIEW dbo.vw_pbi_rightsizing_resource_monthly;
+GO
+IF OBJECT_ID(N'dbo.vw_pbi_rightsizing_intramonth', N'V') IS NOT NULL DROP VIEW dbo.vw_pbi_rightsizing_intramonth;
+GO
+IF OBJECT_ID(N'dbo.vw_pbi_rightsizing_summary_monthly', N'V') IS NOT NULL DROP VIEW dbo.vw_pbi_rightsizing_summary_monthly;
+GO
+IF OBJECT_ID(N'dbo.agg_resource_rightsizing_monthly', N'U') IS NOT NULL DROP TABLE dbo.agg_resource_rightsizing_monthly;
+GO
+IF OBJECT_ID(N'dbo.agg_resource_rightsizing_intramonth', N'U') IS NOT NULL DROP TABLE dbo.agg_resource_rightsizing_intramonth;
+GO
+IF OBJECT_ID(N'dbo.agg_rightsizing_summary_monthly', N'U') IS NOT NULL DROP TABLE dbo.agg_rightsizing_summary_monthly;
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.fact_resource_tier_daily') AND type = N'U')
 BEGIN
-  CREATE TABLE dbo.agg_resource_rightsizing_monthly (
-    agg_resource_rightsizing_monthly_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+  CREATE TABLE dbo.fact_resource_tier_daily (
+    fact_resource_tier_daily_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+    charge_date                 DATE NOT NULL,
+    billing_period_start        DATE NOT NULL,
+    provider                    VARCHAR(10) NOT NULL,
+    resource_sk                 INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_resource(resource_sk),
+    service_sk                  INT NOT NULL,
+    application_sk              INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_application(application_sk),
+    environment                 NVARCHAR(128) NOT NULL DEFAULT '(Unknown)',
+    tier_code                   VARCHAR(128) NOT NULL,
+    tier_rank                   INT NOT NULL DEFAULT 0,
+    tier_sku_sk                 INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_sku(sku_sk),
+    tier_unit_rate              DECIMAL(28,10) NOT NULL DEFAULT 0,
+    tier_cost                   DECIMAL(28,10) NOT NULL DEFAULT 0,
+    tier_qty                    DECIMAL(28,10) NOT NULL DEFAULT 0,
+    refreshed_utc               DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    UNIQUE (charge_date, billing_period_start, provider, resource_sk, service_sk)
+  );
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.fact_resource_tier_change') AND type = N'U')
+BEGIN
+  CREATE TABLE dbo.fact_resource_tier_change (
+    fact_resource_tier_change_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+    change_scope                 VARCHAR(16) NOT NULL,
+    month_start                  DATE NOT NULL,
+    change_date                  DATE NOT NULL,
+    provider                     VARCHAR(10) NOT NULL,
+    resource_sk                  INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_resource(resource_sk),
+    service_sk                   INT NOT NULL,
+    application_sk               INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_application(application_sk),
+    environment                  NVARCHAR(128) NOT NULL DEFAULT '(Unknown)',
+    prior_tier_code              VARCHAR(128) NOT NULL,
+    new_tier_code                VARCHAR(128) NOT NULL,
+    prior_tier_rank              INT NOT NULL DEFAULT 0,
+    new_tier_rank                INT NOT NULL DEFAULT 0,
+    prior_tier_sku_sk            INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_sku(sku_sk),
+    new_tier_sku_sk              INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_sku(sku_sk),
+    prior_unit_rate              DECIMAL(28,10) NOT NULL DEFAULT 0,
+    new_unit_rate                DECIMAL(28,10) NOT NULL DEFAULT 0,
+    post_change_quantity         DECIMAL(28,10) NOT NULL DEFAULT 0,
+    days_on_prior_tier           INT NOT NULL DEFAULT 0,
+    days_on_new_tier             INT NOT NULL DEFAULT 0,
+    realized_savings_unit        DECIMAL(28,10) NOT NULL DEFAULT 0,
+    realized_savings_cost_delta  DECIMAL(28,10) NOT NULL DEFAULT 0,
+    projected_annual_savings     DECIMAL(28,10) NOT NULL DEFAULT 0,
+    change_direction             VARCHAR(16) NOT NULL,
+    refreshed_utc                DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+  );
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.agg_resource_tier_change_monthly') AND type = N'U')
+BEGIN
+  CREATE TABLE dbo.agg_resource_tier_change_monthly (
+    agg_resource_tier_change_monthly_id BIGINT IDENTITY(1,1) PRIMARY KEY,
     month_start                         DATE NOT NULL,
     provider                            VARCHAR(10) NOT NULL,
     resource_sk                         INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_resource(resource_sk),
@@ -1088,10 +1197,12 @@ BEGIN
     application_sk                      INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_application(application_sk),
     environment                         NVARCHAR(128) NOT NULL DEFAULT '(Unknown)',
     prior_month_start                   DATE NOT NULL,
-    prior_sku_sk                        INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_sku(sku_sk),
-    current_sku_sk                      INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_sku(sku_sk),
+    prior_tier_code                     VARCHAR(128) NOT NULL,
+    new_tier_code                       VARCHAR(128) NOT NULL,
+    prior_tier_sku_sk                   INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_sku(sku_sk),
+    new_tier_sku_sk                     INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_sku(sku_sk),
     prior_unit_rate                     DECIMAL(28,10) NOT NULL DEFAULT 0,
-    current_unit_rate                   DECIMAL(28,10) NOT NULL DEFAULT 0,
+    new_unit_rate                       DECIMAL(28,10) NOT NULL DEFAULT 0,
     post_change_quantity                DECIMAL(28,10) NOT NULL DEFAULT 0,
     realized_savings_unit               DECIMAL(28,10) NOT NULL DEFAULT 0,
     realized_savings_cost_delta         DECIMAL(28,10) NOT NULL DEFAULT 0,
@@ -1103,26 +1214,10 @@ BEGIN
 END
 GO
 
-IF OBJECT_ID(N'dbo.agg_resource_rightsizing_monthly', N'U') IS NOT NULL
-  AND COL_LENGTH('dbo.agg_resource_rightsizing_monthly', 'projected_annual_savings') IS NULL
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.agg_resource_tier_change_intramonth') AND type = N'U')
 BEGIN
-  ALTER TABLE dbo.agg_resource_rightsizing_monthly ADD projected_annual_savings DECIMAL(28,10) NOT NULL
-    CONSTRAINT DF_agg_res_rightsizing_monthly_proj DEFAULT 0;
-  ALTER TABLE dbo.agg_resource_rightsizing_monthly DROP CONSTRAINT DF_agg_res_rightsizing_monthly_proj;
-END
-GO
-
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_resource_rightsizing_monthly_month' AND object_id = OBJECT_ID(N'dbo.agg_resource_rightsizing_monthly'))
-BEGIN
-  CREATE INDEX IX_agg_resource_rightsizing_monthly_month
-    ON dbo.agg_resource_rightsizing_monthly (month_start, provider, service_sk);
-END
-GO
-
-IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.agg_resource_rightsizing_intramonth') AND type = N'U')
-BEGIN
-  CREATE TABLE dbo.agg_resource_rightsizing_intramonth (
-    agg_resource_rightsizing_intramonth_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+  CREATE TABLE dbo.agg_resource_tier_change_intramonth (
+    agg_resource_tier_change_intramonth_id BIGINT IDENTITY(1,1) PRIMARY KEY,
     month_start                            DATE NOT NULL,
     provider                               VARCHAR(10) NOT NULL,
     resource_sk                            INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_resource(resource_sk),
@@ -1130,40 +1225,28 @@ BEGIN
     application_sk                         INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_application(application_sk),
     environment                            NVARCHAR(128) NOT NULL DEFAULT '(Unknown)',
     change_date                            DATE NOT NULL,
-    prior_sku_sk                           INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_sku(sku_sk),
-    new_sku_sk                             INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_sku(sku_sk),
-    days_on_prior_sku                      INT NOT NULL DEFAULT 0,
-    days_on_new_sku                        INT NOT NULL DEFAULT 0,
+    prior_tier_code                        VARCHAR(128) NOT NULL,
+    new_tier_code                          VARCHAR(128) NOT NULL,
+    prior_tier_sku_sk                      INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_sku(sku_sk),
+    new_tier_sku_sk                        INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_sku(sku_sk),
+    days_on_prior_tier                     INT NOT NULL DEFAULT 0,
+    days_on_new_tier                       INT NOT NULL DEFAULT 0,
+    prior_unit_rate                        DECIMAL(28,10) NOT NULL DEFAULT 0,
+    new_unit_rate                          DECIMAL(28,10) NOT NULL DEFAULT 0,
     realized_savings_unit                  DECIMAL(28,10) NOT NULL DEFAULT 0,
     realized_savings_cost_delta            DECIMAL(28,10) NOT NULL DEFAULT 0,
     projected_annual_savings               DECIMAL(28,10) NOT NULL DEFAULT 0,
     change_direction                       VARCHAR(16) NOT NULL,
     refreshed_utc                          DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
-    UNIQUE (month_start, provider, resource_sk, service_sk, change_date, new_sku_sk)
+    UNIQUE (month_start, provider, resource_sk, service_sk, change_date, new_tier_code)
   );
 END
 GO
 
-IF OBJECT_ID(N'dbo.agg_resource_rightsizing_intramonth', N'U') IS NOT NULL
-  AND COL_LENGTH('dbo.agg_resource_rightsizing_intramonth', 'projected_annual_savings') IS NULL
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.agg_tier_change_summary_monthly') AND type = N'U')
 BEGIN
-  ALTER TABLE dbo.agg_resource_rightsizing_intramonth ADD projected_annual_savings DECIMAL(28,10) NOT NULL
-    CONSTRAINT DF_agg_res_rightsizing_intramonth_proj DEFAULT 0;
-  ALTER TABLE dbo.agg_resource_rightsizing_intramonth DROP CONSTRAINT DF_agg_res_rightsizing_intramonth_proj;
-END
-GO
-
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_resource_rightsizing_intramonth_month' AND object_id = OBJECT_ID(N'dbo.agg_resource_rightsizing_intramonth'))
-BEGIN
-  CREATE INDEX IX_agg_resource_rightsizing_intramonth_month
-    ON dbo.agg_resource_rightsizing_intramonth (month_start, provider, resource_sk);
-END
-GO
-
-IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.agg_rightsizing_summary_monthly') AND type = N'U')
-BEGIN
-  CREATE TABLE dbo.agg_rightsizing_summary_monthly (
-    agg_rightsizing_summary_monthly_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+  CREATE TABLE dbo.agg_tier_change_summary_monthly (
+    agg_tier_change_summary_monthly_id BIGINT IDENTITY(1,1) PRIMARY KEY,
     month_start                        DATE NOT NULL,
     provider                           VARCHAR(10) NOT NULL,
     service_sk                         INT NOT NULL,
@@ -1179,10 +1262,29 @@ BEGIN
 END
 GO
 
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_rightsizing_summary_monthly_month' AND object_id = OBJECT_ID(N'dbo.agg_rightsizing_summary_monthly'))
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_fact_resource_tier_daily_month' AND object_id = OBJECT_ID(N'dbo.fact_resource_tier_daily'))
 BEGIN
-  CREATE INDEX IX_agg_rightsizing_summary_monthly_month
-    ON dbo.agg_rightsizing_summary_monthly (month_start, provider, service_sk);
+  CREATE INDEX IX_fact_resource_tier_daily_month ON dbo.fact_resource_tier_daily (billing_period_start, provider, resource_sk);
+END
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_fact_resource_tier_change_month' AND object_id = OBJECT_ID(N'dbo.fact_resource_tier_change'))
+BEGIN
+  CREATE INDEX IX_fact_resource_tier_change_month ON dbo.fact_resource_tier_change (month_start, provider, resource_sk);
+END
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_resource_tier_change_monthly_month' AND object_id = OBJECT_ID(N'dbo.agg_resource_tier_change_monthly'))
+BEGIN
+  CREATE INDEX IX_agg_resource_tier_change_monthly_month ON dbo.agg_resource_tier_change_monthly (month_start, provider, service_sk);
+END
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_resource_tier_change_intramonth_month' AND object_id = OBJECT_ID(N'dbo.agg_resource_tier_change_intramonth'))
+BEGIN
+  CREATE INDEX IX_agg_resource_tier_change_intramonth_month ON dbo.agg_resource_tier_change_intramonth (month_start, provider, resource_sk);
+END
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_tier_change_summary_monthly_month' AND object_id = OBJECT_ID(N'dbo.agg_tier_change_summary_monthly'))
+BEGIN
+  CREATE INDEX IX_agg_tier_change_summary_monthly_month ON dbo.agg_tier_change_summary_monthly (month_start, provider, service_sk);
 END
 GO
 
@@ -1810,7 +1912,7 @@ FROM dbo.agg_commitment_utilization a
 INNER JOIN dbo.dim_commitment_discount c ON a.commitment_sk = c.commitment_sk;
 GO
 
-CREATE OR ALTER VIEW dbo.vw_pbi_rightsizing_resource_monthly AS
+CREATE OR ALTER VIEW dbo.vw_pbi_tier_change_resource_monthly AS
 SELECT
     r.month_start,
     r.provider,
@@ -1823,27 +1925,29 @@ SELECT
     app.application_sk,
     app.application_name,
     r.environment,
-    r.prior_sku_sk,
-    ps.sku_id AS prior_sku_id,
-    r.current_sku_sk,
-    cs.sku_id AS current_sku_id,
+    r.prior_tier_code,
+    r.new_tier_code,
+    r.prior_tier_sku_sk,
+    ps.sku_meter AS prior_sku_meter,
+    r.new_tier_sku_sk,
+    ns.sku_meter AS new_sku_meter,
     r.prior_unit_rate,
-    r.current_unit_rate,
+    r.new_unit_rate,
     r.post_change_quantity,
     r.realized_savings_unit,
     r.realized_savings_cost_delta,
     r.projected_annual_savings,
     r.change_direction,
     r.refreshed_utc
-FROM dbo.agg_resource_rightsizing_monthly r
+FROM dbo.agg_resource_tier_change_monthly r
 INNER JOIN dbo.dim_resource res ON r.resource_sk = res.resource_sk
 INNER JOIN dbo.dim_service svc ON r.service_sk = svc.service_sk
 INNER JOIN dbo.dim_application app ON r.application_sk = app.application_sk
-INNER JOIN dbo.dim_sku ps ON r.prior_sku_sk = ps.sku_sk
-INNER JOIN dbo.dim_sku cs ON r.current_sku_sk = cs.sku_sk;
+INNER JOIN dbo.dim_sku ps ON r.prior_tier_sku_sk = ps.sku_sk
+INNER JOIN dbo.dim_sku ns ON r.new_tier_sku_sk = ns.sku_sk;
 GO
 
-CREATE OR ALTER VIEW dbo.vw_pbi_rightsizing_intramonth AS
+CREATE OR ALTER VIEW dbo.vw_pbi_tier_change_intramonth AS
 SELECT
     r.month_start,
     r.provider,
@@ -1855,26 +1959,30 @@ SELECT
     app.application_sk,
     app.application_name,
     r.environment,
-    r.prior_sku_sk,
-    ps.sku_id AS prior_sku_id,
-    r.new_sku_sk,
-    ns.sku_id AS new_sku_id,
-    r.days_on_prior_sku,
-    r.days_on_new_sku,
+    r.prior_tier_code,
+    r.new_tier_code,
+    r.prior_tier_sku_sk,
+    ps.sku_meter AS prior_sku_meter,
+    r.new_tier_sku_sk,
+    ns.sku_meter AS new_sku_meter,
+    r.days_on_prior_tier,
+    r.days_on_new_tier,
+    r.prior_unit_rate,
+    r.new_unit_rate,
     r.realized_savings_unit,
     r.realized_savings_cost_delta,
     r.projected_annual_savings,
     r.change_direction,
     r.refreshed_utc
-FROM dbo.agg_resource_rightsizing_intramonth r
+FROM dbo.agg_resource_tier_change_intramonth r
 INNER JOIN dbo.dim_resource res ON r.resource_sk = res.resource_sk
 INNER JOIN dbo.dim_service svc ON r.service_sk = svc.service_sk
 INNER JOIN dbo.dim_application app ON r.application_sk = app.application_sk
-INNER JOIN dbo.dim_sku ps ON r.prior_sku_sk = ps.sku_sk
-INNER JOIN dbo.dim_sku ns ON r.new_sku_sk = ns.sku_sk;
+INNER JOIN dbo.dim_sku ps ON r.prior_tier_sku_sk = ps.sku_sk
+INNER JOIN dbo.dim_sku ns ON r.new_tier_sku_sk = ns.sku_sk;
 GO
 
-CREATE OR ALTER VIEW dbo.vw_pbi_rightsizing_summary_monthly AS
+CREATE OR ALTER VIEW dbo.vw_pbi_tier_change_summary_monthly AS
 SELECT
     a.month_start,
     a.provider,
@@ -1887,7 +1995,7 @@ SELECT
     a.downsize_count,
     a.upsize_count,
     a.refreshed_utc
-FROM dbo.agg_rightsizing_summary_monthly a
+FROM dbo.agg_tier_change_summary_monthly a
 INNER JOIN dbo.dim_service svc ON a.service_sk = svc.service_sk;
 GO
 

@@ -279,6 +279,9 @@ func (p *Processor) upsertSKU(ctx context.Context, tx *sql.Tx, r normRow) error 
 		if err != nil {
 			return err
 		}
+		if err := p.enrichSkuTier(ctx, tx, r.ProviderCode, focus.PtrStr(r.SkuId), focus.PtrStr(r.SkuPriceId)); err != nil {
+			return err
+		}
 		if !existed {
 			var sk int64
 			err = tx.QueryRowContext(ctx, `SELECT sku_sk FROM dim_sku WHERE provider = ? AND sku_id = ? AND IFNULL(sku_price_id,'') = ?`,
@@ -300,7 +303,10 @@ func (p *Processor) upsertSKU(ctx context.Context, tx *sql.Tx, r normRow) error 
 		WHEN NOT MATCHED THEN INSERT (provider, sku_id, sku_price_id, sku_meter, sku_price_details, service_name)
 		  VALUES (s.provider, s.sku_id, s.sku_price_id, s.sku_meter, s.sku_price_details, s.service_name);`,
 		r.ProviderCode, focus.PtrStr(r.SkuId), focus.PtrStr(r.SkuPriceId), nullStr(r.SkuMeter), nullStr(r.SkuPriceDetails), nullStr(r.ServiceName))
-	return err
+	if err != nil {
+		return err
+	}
+	return p.enrichSkuTier(ctx, tx, r.ProviderCode, focus.PtrStr(r.SkuId), focus.PtrStr(r.SkuPriceId))
 }
 
 func (p *Processor) upsertCommitment(ctx context.Context, tx *sql.Tx, r normRow) error {

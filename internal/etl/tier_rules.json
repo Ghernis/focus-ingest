@@ -1,0 +1,49 @@
+{
+  "rules": [
+    {
+      "provider": "AZURE",
+      "service_name": "Virtual Machines",
+      "line_match_regex": "Compute Hour",
+      "tier_extract_regex": "^([A-Z]\\d+[a-z]*s?\\s*v\\d+)$",
+      "tier_rank_mode": "numeric_suffix",
+      "priority": 10
+    },
+    {
+      "provider": "AZURE",
+      "service_name": "Azure App Service",
+      "line_match_regex": "App Service Hour",
+      "tier_extract_regex": "^([A-Z][A-Za-z0-9]+(?:\\s+v\\d+)?\\s+App|[A-Z]\\d+[A-Za-z]*)$",
+      "tier_rank_mode": "lookup",
+      "priority": 20
+    },
+    {
+      "provider": "AZURE",
+      "service_name": "SQL Managed Instance",
+      "line_match_regex": "vCore Hour|Compute Hour",
+      "tier_extract_regex": "^(\\d+)\\s*vCore$",
+      "tier_rank_mode": "vcore_count",
+      "priority": 30
+    }
+  ],
+  "ranks": [
+    {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "F1 App", "tier_rank": 10},
+    {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "F1", "tier_rank": 10},
+    {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "B1", "tier_rank": 20},
+    {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "B2", "tier_rank": 30},
+    {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "B3", "tier_rank": 40},
+    {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "S1 App", "tier_rank": 50},
+    {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "S1", "tier_rank": 50},
+    {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "S2 App", "tier_rank": 60},
+    {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "S2", "tier_rank": 60},
+    {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "S3 App", "tier_rank": 70},
+    {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "S3", "tier_rank": 70},
+    {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "P0v3 App", "tier_rank": 80},
+    {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "P1v3 App", "tier_rank": 90},
+    {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "P2v3 App", "tier_rank": 100},
+    {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "P2v3", "tier_rank": 100},
+    {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "P3v3 App", "tier_rank": 110},
+    {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "I1 v2 App", "tier_rank": 120},
+    {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "I2 v2 App", "tier_rank": 130},
+    {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "I3 v2 App", "tier_rank": 140}
+  ]
+}

@@ -68,7 +68,30 @@ CREATE TABLE IF NOT EXISTS dim_sku (
   sku_meter         TEXT NULL,
   sku_price_details TEXT NULL,
   service_name      TEXT NULL,
+  tier_code         TEXT NULL,
+  tier_rank         INTEGER NULL,
+  is_tier_meter     INTEGER NOT NULL DEFAULT 0,
   UNIQUE (provider, sku_id, sku_price_id)
+);
+
+CREATE TABLE IF NOT EXISTS dim_tier_rule (
+  tier_rule_sk     INTEGER PRIMARY KEY AUTOINCREMENT,
+  provider         TEXT NOT NULL,
+  service_name     TEXT NOT NULL,
+  line_match_regex TEXT NOT NULL,
+  tier_extract_regex TEXT NOT NULL,
+  tier_rank_mode   TEXT NOT NULL,
+  priority         INTEGER NOT NULL DEFAULT 100,
+  UNIQUE (provider, service_name, priority)
+);
+
+CREATE TABLE IF NOT EXISTS dim_tier_rank (
+  tier_rank_sk INTEGER PRIMARY KEY AUTOINCREMENT,
+  provider     TEXT NOT NULL,
+  service_name TEXT NOT NULL,
+  tier_code    TEXT NOT NULL,
+  tier_rank    INTEGER NOT NULL,
+  UNIQUE (provider, service_name, tier_code)
 );
 
 CREATE TABLE IF NOT EXISTS dim_charge_category (
@@ -600,8 +623,55 @@ CREATE TABLE IF NOT EXISTS agg_savings_summary (
   UNIQUE (month_start, provider, service_sk)
 );
 
-CREATE TABLE IF NOT EXISTS agg_resource_rightsizing_monthly (
-  agg_resource_rightsizing_monthly_id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS fact_resource_tier_daily (
+  fact_resource_tier_daily_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  charge_date                 TEXT NOT NULL,
+  billing_period_start        TEXT NOT NULL,
+  provider                    TEXT NOT NULL,
+  resource_sk                 INTEGER NOT NULL REFERENCES dim_resource(resource_sk),
+  service_sk                  INTEGER NOT NULL,
+  application_sk              INTEGER NOT NULL REFERENCES dim_application(application_sk),
+  environment                 TEXT NOT NULL DEFAULT '(Unknown)',
+  tier_code                   TEXT NOT NULL,
+  tier_rank                   INTEGER NOT NULL DEFAULT 0,
+  tier_sku_sk                 INTEGER NOT NULL REFERENCES dim_sku(sku_sk),
+  tier_unit_rate              TEXT NOT NULL DEFAULT '0',
+  tier_cost                   TEXT NOT NULL DEFAULT '0',
+  tier_qty                    TEXT NOT NULL DEFAULT '0',
+  refreshed_utc               TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (charge_date, billing_period_start, provider, resource_sk, service_sk)
+);
+
+CREATE TABLE IF NOT EXISTS fact_resource_tier_change (
+  fact_resource_tier_change_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  change_scope                   TEXT NOT NULL,
+  month_start                    TEXT NOT NULL,
+  change_date                    TEXT NOT NULL,
+  provider                       TEXT NOT NULL,
+  resource_sk                    INTEGER NOT NULL REFERENCES dim_resource(resource_sk),
+  service_sk                     INTEGER NOT NULL,
+  application_sk                 INTEGER NOT NULL REFERENCES dim_application(application_sk),
+  environment                    TEXT NOT NULL DEFAULT '(Unknown)',
+  prior_tier_code                TEXT NOT NULL,
+  new_tier_code                  TEXT NOT NULL,
+  prior_tier_rank                INTEGER NOT NULL DEFAULT 0,
+  new_tier_rank                  INTEGER NOT NULL DEFAULT 0,
+  prior_tier_sku_sk              INTEGER NOT NULL REFERENCES dim_sku(sku_sk),
+  new_tier_sku_sk                INTEGER NOT NULL REFERENCES dim_sku(sku_sk),
+  prior_unit_rate                TEXT NOT NULL DEFAULT '0',
+  new_unit_rate                  TEXT NOT NULL DEFAULT '0',
+  post_change_quantity           TEXT NOT NULL DEFAULT '0',
+  days_on_prior_tier             INTEGER NOT NULL DEFAULT 0,
+  days_on_new_tier               INTEGER NOT NULL DEFAULT 0,
+  realized_savings_unit          TEXT NOT NULL DEFAULT '0',
+  realized_savings_cost_delta    TEXT NOT NULL DEFAULT '0',
+  projected_annual_savings     TEXT NOT NULL DEFAULT '0',
+  change_direction               TEXT NOT NULL,
+  refreshed_utc                  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS agg_resource_tier_change_monthly (
+  agg_resource_tier_change_monthly_id INTEGER PRIMARY KEY AUTOINCREMENT,
   month_start                         TEXT NOT NULL,
   provider                            TEXT NOT NULL,
   resource_sk                         INTEGER NOT NULL REFERENCES dim_resource(resource_sk),
@@ -609,10 +679,12 @@ CREATE TABLE IF NOT EXISTS agg_resource_rightsizing_monthly (
   application_sk                      INTEGER NOT NULL REFERENCES dim_application(application_sk),
   environment                         TEXT NOT NULL DEFAULT '(Unknown)',
   prior_month_start                   TEXT NOT NULL,
-  prior_sku_sk                        INTEGER NOT NULL REFERENCES dim_sku(sku_sk),
-  current_sku_sk                      INTEGER NOT NULL REFERENCES dim_sku(sku_sk),
+  prior_tier_code                     TEXT NOT NULL,
+  new_tier_code                       TEXT NOT NULL,
+  prior_tier_sku_sk                   INTEGER NOT NULL REFERENCES dim_sku(sku_sk),
+  new_tier_sku_sk                     INTEGER NOT NULL REFERENCES dim_sku(sku_sk),
   prior_unit_rate                     TEXT NOT NULL DEFAULT '0',
-  current_unit_rate                   TEXT NOT NULL DEFAULT '0',
+  new_unit_rate                       TEXT NOT NULL DEFAULT '0',
   post_change_quantity                TEXT NOT NULL DEFAULT '0',
   realized_savings_unit               TEXT NOT NULL DEFAULT '0',
   realized_savings_cost_delta         TEXT NOT NULL DEFAULT '0',
@@ -622,8 +694,8 @@ CREATE TABLE IF NOT EXISTS agg_resource_rightsizing_monthly (
   UNIQUE (month_start, provider, resource_sk, service_sk)
 );
 
-CREATE TABLE IF NOT EXISTS agg_resource_rightsizing_intramonth (
-  agg_resource_rightsizing_intramonth_id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS agg_resource_tier_change_intramonth (
+  agg_resource_tier_change_intramonth_id INTEGER PRIMARY KEY AUTOINCREMENT,
   month_start                            TEXT NOT NULL,
   provider                               TEXT NOT NULL,
   resource_sk                            INTEGER NOT NULL REFERENCES dim_resource(resource_sk),
@@ -631,20 +703,24 @@ CREATE TABLE IF NOT EXISTS agg_resource_rightsizing_intramonth (
   application_sk                         INTEGER NOT NULL REFERENCES dim_application(application_sk),
   environment                            TEXT NOT NULL DEFAULT '(Unknown)',
   change_date                            TEXT NOT NULL,
-  prior_sku_sk                           INTEGER NOT NULL REFERENCES dim_sku(sku_sk),
-  new_sku_sk                             INTEGER NOT NULL REFERENCES dim_sku(sku_sk),
-  days_on_prior_sku                      INTEGER NOT NULL DEFAULT 0,
-  days_on_new_sku                        INTEGER NOT NULL DEFAULT 0,
+  prior_tier_code                        TEXT NOT NULL,
+  new_tier_code                          TEXT NOT NULL,
+  prior_tier_sku_sk                      INTEGER NOT NULL REFERENCES dim_sku(sku_sk),
+  new_tier_sku_sk                        INTEGER NOT NULL REFERENCES dim_sku(sku_sk),
+  days_on_prior_tier                     INTEGER NOT NULL DEFAULT 0,
+  days_on_new_tier                       INTEGER NOT NULL DEFAULT 0,
+  prior_unit_rate                        TEXT NOT NULL DEFAULT '0',
+  new_unit_rate                          TEXT NOT NULL DEFAULT '0',
   realized_savings_unit                  TEXT NOT NULL DEFAULT '0',
   realized_savings_cost_delta            TEXT NOT NULL DEFAULT '0',
   projected_annual_savings               TEXT NOT NULL DEFAULT '0',
   change_direction                       TEXT NOT NULL,
   refreshed_utc                          TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (month_start, provider, resource_sk, service_sk, change_date, new_sku_sk)
+  UNIQUE (month_start, provider, resource_sk, service_sk, change_date, new_tier_code)
 );
 
-CREATE TABLE IF NOT EXISTS agg_rightsizing_summary_monthly (
-  agg_rightsizing_summary_monthly_id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS agg_tier_change_summary_monthly (
+  agg_tier_change_summary_monthly_id INTEGER PRIMARY KEY AUTOINCREMENT,
   month_start                        TEXT NOT NULL,
   provider                           TEXT NOT NULL,
   service_sk                         INTEGER NOT NULL,
@@ -658,12 +734,16 @@ CREATE TABLE IF NOT EXISTS agg_rightsizing_summary_monthly (
   UNIQUE (month_start, provider, service_sk)
 );
 
-CREATE INDEX IF NOT EXISTS IX_agg_resource_rightsizing_monthly_month
-  ON agg_resource_rightsizing_monthly (month_start, provider, service_sk);
-CREATE INDEX IF NOT EXISTS IX_agg_resource_rightsizing_intramonth_month
-  ON agg_resource_rightsizing_intramonth (month_start, provider, resource_sk);
-CREATE INDEX IF NOT EXISTS IX_agg_rightsizing_summary_monthly_month
-  ON agg_rightsizing_summary_monthly (month_start, provider, service_sk);
+CREATE INDEX IF NOT EXISTS IX_fact_resource_tier_daily_month
+  ON fact_resource_tier_daily (billing_period_start, provider, resource_sk);
+CREATE INDEX IF NOT EXISTS IX_fact_resource_tier_change_month
+  ON fact_resource_tier_change (month_start, provider, resource_sk);
+CREATE INDEX IF NOT EXISTS IX_agg_resource_tier_change_monthly_month
+  ON agg_resource_tier_change_monthly (month_start, provider, service_sk);
+CREATE INDEX IF NOT EXISTS IX_agg_resource_tier_change_intramonth_month
+  ON agg_resource_tier_change_intramonth (month_start, provider, resource_sk);
+CREATE INDEX IF NOT EXISTS IX_agg_tier_change_summary_monthly_month
+  ON agg_tier_change_summary_monthly (month_start, provider, service_sk);
 
 -- Application spend (primary metric: billed_cost = actual paid after discounts/credits)
 CREATE TABLE IF NOT EXISTS agg_app_monthly (
@@ -917,51 +997,57 @@ FROM agg_commitment_utilization a
 INNER JOIN dim_commitment_discount c ON a.commitment_sk = c.commitment_sk;
 
 DROP VIEW IF EXISTS vw_pbi_rightsizing_resource_monthly;
-CREATE VIEW vw_pbi_rightsizing_resource_monthly AS
+DROP VIEW IF EXISTS vw_pbi_rightsizing_intramonth;
+DROP VIEW IF EXISTS vw_pbi_rightsizing_summary_monthly;
+DROP VIEW IF EXISTS vw_pbi_tier_change_resource_monthly;
+CREATE VIEW vw_pbi_tier_change_resource_monthly AS
 SELECT
   r.month_start, r.provider, r.prior_month_start,
   r.resource_sk, res.name AS resource_name, res.resource_type,
   r.service_sk, svc.service_name,
   app.application_sk, app.application_name, r.environment,
-  r.prior_sku_sk, ps.sku_id AS prior_sku_id,
-  r.current_sku_sk, cs.sku_id AS current_sku_id,
-  r.prior_unit_rate, r.current_unit_rate, r.post_change_quantity,
-  r.realized_savings_unit, r.realized_savings_cost_delta, r.change_direction,
-  r.refreshed_utc
-FROM agg_resource_rightsizing_monthly r
+  r.prior_tier_code, r.new_tier_code,
+  r.prior_tier_sku_sk, ps.sku_meter AS prior_sku_meter,
+  r.new_tier_sku_sk, ns.sku_meter AS new_sku_meter,
+  r.prior_unit_rate, r.new_unit_rate, r.post_change_quantity,
+  r.realized_savings_unit, r.realized_savings_cost_delta, r.projected_annual_savings,
+  r.change_direction, r.refreshed_utc
+FROM agg_resource_tier_change_monthly r
 INNER JOIN dim_resource res ON r.resource_sk = res.resource_sk
 INNER JOIN dim_service svc ON r.service_sk = svc.service_sk
 INNER JOIN dim_application app ON r.application_sk = app.application_sk
-INNER JOIN dim_sku ps ON r.prior_sku_sk = ps.sku_sk
-INNER JOIN dim_sku cs ON r.current_sku_sk = cs.sku_sk;
+INNER JOIN dim_sku ps ON r.prior_tier_sku_sk = ps.sku_sk
+INNER JOIN dim_sku ns ON r.new_tier_sku_sk = ns.sku_sk;
 
-DROP VIEW IF EXISTS vw_pbi_rightsizing_intramonth;
-CREATE VIEW vw_pbi_rightsizing_intramonth AS
+DROP VIEW IF EXISTS vw_pbi_tier_change_intramonth;
+CREATE VIEW vw_pbi_tier_change_intramonth AS
 SELECT
   r.month_start, r.provider, r.change_date,
   r.resource_sk, res.name AS resource_name,
   r.service_sk, svc.service_name,
   app.application_sk, app.application_name, r.environment,
-  r.prior_sku_sk, ps.sku_id AS prior_sku_id,
-  r.new_sku_sk, ns.sku_id AS new_sku_id,
-  r.days_on_prior_sku, r.days_on_new_sku,
-  r.realized_savings_unit, r.realized_savings_cost_delta, r.change_direction,
-  r.refreshed_utc
-FROM agg_resource_rightsizing_intramonth r
+  r.prior_tier_code, r.new_tier_code,
+  r.prior_tier_sku_sk, ps.sku_meter AS prior_sku_meter,
+  r.new_tier_sku_sk, ns.sku_meter AS new_sku_meter,
+  r.days_on_prior_tier, r.days_on_new_tier,
+  r.prior_unit_rate, r.new_unit_rate,
+  r.realized_savings_unit, r.realized_savings_cost_delta, r.projected_annual_savings,
+  r.change_direction, r.refreshed_utc
+FROM agg_resource_tier_change_intramonth r
 INNER JOIN dim_resource res ON r.resource_sk = res.resource_sk
 INNER JOIN dim_service svc ON r.service_sk = svc.service_sk
 INNER JOIN dim_application app ON r.application_sk = app.application_sk
-INNER JOIN dim_sku ps ON r.prior_sku_sk = ps.sku_sk
-INNER JOIN dim_sku ns ON r.new_sku_sk = ns.sku_sk;
+INNER JOIN dim_sku ps ON r.prior_tier_sku_sk = ps.sku_sk
+INNER JOIN dim_sku ns ON r.new_tier_sku_sk = ns.sku_sk;
 
-DROP VIEW IF EXISTS vw_pbi_rightsizing_summary_monthly;
-CREATE VIEW vw_pbi_rightsizing_summary_monthly AS
+DROP VIEW IF EXISTS vw_pbi_tier_change_summary_monthly;
+CREATE VIEW vw_pbi_tier_change_summary_monthly AS
 SELECT
   a.month_start, a.provider, a.service_sk, svc.service_name,
   a.total_realized_savings_unit, a.total_realized_savings_cost_delta,
   a.mom_change_count, a.intramonth_change_count,
   a.downsize_count, a.upsize_count, a.refreshed_utc
-FROM agg_rightsizing_summary_monthly a
+FROM agg_tier_change_summary_monthly a
 INNER JOIN dim_service svc ON a.service_sk = svc.service_sk;
 
 DROP VIEW IF EXISTS vw_pbi_savings_summary;

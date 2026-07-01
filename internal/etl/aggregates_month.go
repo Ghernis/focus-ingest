@@ -46,7 +46,7 @@ func (p *Processor) rebuildAggregatesForMonth(ctx context.Context, tx *sql.Tx, m
 	if err := p.insertAppAggregatesForMonth(ctx, tx, month); err != nil {
 		return err
 	}
-	if err := p.rebuildRightsizingForMonth(ctx, tx, month); err != nil {
+	if err := p.rebuildTierForMonth(ctx, tx, month); err != nil {
 		return err
 	}
 	if err := p.rebuildCostDistributionForMonth(ctx, tx, month); err != nil {
@@ -80,9 +80,11 @@ func (p *Processor) deleteAggregatesForMonth(ctx context.Context, tx *sql.Tx, mo
 		{"agg_cost_by_tag", m},
 		{"agg_commitment_utilization", m},
 		{"agg_savings_summary", m},
-		{"agg_resource_rightsizing_monthly", m},
-		{"agg_resource_rightsizing_intramonth", m},
-		{"agg_rightsizing_summary_monthly", m},
+		{"fact_resource_tier_daily", bm},
+		{"fact_resource_tier_change", m},
+		{"agg_resource_tier_change_monthly", m},
+		{"agg_resource_tier_change_intramonth", m},
+		{"agg_tier_change_summary_monthly", m},
 		{"agg_app_monthly", m},
 		{"agg_app_service_monthly", m},
 		{"agg_app_service_resource_monthly", m},

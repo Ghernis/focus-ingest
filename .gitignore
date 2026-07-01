@@ -3,3 +3,4 @@ bin
 data
 *.exe
 focus_sample_*.csv
+ms_skus.json
