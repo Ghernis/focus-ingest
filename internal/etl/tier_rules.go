@@ -118,16 +118,8 @@ func (e *tierRulesEngine) matchSKU(provider, serviceName, skuPriceID, skuMeter s
 		if !ruleMatchesLine(rule, skuPriceID, skuMeter) {
 			continue
 		}
-		meter := strings.TrimSpace(skuMeter)
-		if meter == "" {
-			return skuTierMatch{}, false
-		}
-		sub := rule.tierExtract.FindStringSubmatch(meter)
-		if len(sub) < 2 {
-			return skuTierMatch{}, false
-		}
-		code := strings.TrimSpace(sub[1])
-		if code == "" {
+		code, ok := extractTierCode(rule.tierExtract, skuMeter)
+		if !ok {
 			return skuTierMatch{}, false
 		}
 		rank := e.tierRank(rule, code)
@@ -152,6 +144,30 @@ func ruleMatchesLine(rule compiledTierRule, skuPriceID, skuMeter string) bool {
 		}
 	}
 	return false
+}
+
+func extractTierCode(tierExtract *regexp.Regexp, skuMeter string) (string, bool) {
+	meter := strings.TrimSpace(skuMeter)
+	if meter == "" {
+		return "", false
+	}
+	candidates := []string{meter}
+	if i := strings.LastIndex(meter, "/"); i >= 0 {
+		if right := strings.TrimSpace(meter[i+1:]); right != "" {
+			candidates = append([]string{right}, candidates...)
+		}
+	}
+	for _, candidate := range candidates {
+		sub := tierExtract.FindStringSubmatch(candidate)
+		if len(sub) < 2 {
+			continue
+		}
+		code := strings.TrimSpace(sub[1])
+		if code != "" {
+			return code, true
+		}
+	}
+	return "", false
 }
 
 func rankLookupServices(serviceName string) []string {

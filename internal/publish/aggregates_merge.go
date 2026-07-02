@@ -88,6 +88,7 @@ func publishAggregatesMerge(ctx context.Context, local, server *sql.DB, month st
 			return err
 		}
 		merged := mergeAggRowMaps(serverRows, localRows, spec)
+		merged = consolidateAggRows(merged, spec)
 		if err := deleteAggTableMonth(ctx, tx, spec); err != nil {
 			return err
 		}
@@ -153,12 +154,27 @@ func mergeAggRowMaps(base, delta map[string][]interface{}, spec aggPublishSpec) 
 	return out
 }
 
+func consolidateAggRows(rows map[string][]interface{}, spec aggPublishSpec) map[string][]interface{} {
+	out := make(map[string][]interface{}, len(rows))
+	for _, vals := range rows {
+		dup := append([]interface{}(nil), vals...)
+		key := grainKeyWithNorm(dup, spec.grainCols, spec.grainNorms)
+		if prev, ok := out[key]; ok {
+			mergeRows(prev, dup, spec.sumDecCols, spec.sumIntCols)
+		} else {
+			out[key] = dup
+		}
+	}
+	return out
+}
+
 func deleteAggTableMonth(ctx context.Context, tx *sql.Tx, spec aggPublishSpec) error {
 	_, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE %s", spec.table, spec.localWhere))
 	return err
 }
 
 func writeAggRows(ctx context.Context, tx *sql.Tx, spec aggPublishSpec, rows map[string][]interface{}) (int, error) {
+	rows = consolidateAggRows(rows, spec)
 	var batch [][]interface{}
 	total := 0
 	prefix := fmt.Sprintf(`INSERT INTO %s (%s) VALUES `, spec.table, spec.serverCols)

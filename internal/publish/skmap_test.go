@@ -118,3 +118,29 @@ func TestCoerceAggValsCostDailyRow(t *testing.T) {
 		t.Fatalf("refreshed_utc type %T", vals[11])
 	}
 }
+
+func TestConsolidateAggRowsCostMonthlyDuplicateGrain(t *testing.T) {
+	spec := aggSpecs("2026-01-01")[2] // agg_cost_monthly
+	rows := map[string][]interface{}{
+		"a": {
+			"2026-01-01", "AZURE", int64(3), "Management and Governance", int64(2),
+			"10", "9", "11", "10", int64(1), "2026-06-01 00:00:00",
+		},
+		"b": {
+			"2026-01-01T00:00:00Z", "azure", int64(3), "MANAGEMENT AND GOVERNANCE", int64(2),
+			"5", "4", "6", "5", int64(2), "2026-06-02 00:00:00",
+		},
+	}
+	out := consolidateAggRows(rows, spec)
+	if len(out) != 1 {
+		t.Fatalf("expected 1 consolidated row, got %d", len(out))
+	}
+	for _, vals := range out {
+		if vals[9].(int64) != 3 {
+			t.Fatalf("line_count=%v want 3", vals[9])
+		}
+		if vals[3] != "MANAGEMENT AND GOVERNANCE" {
+			t.Fatalf("service_category=%q", vals[3])
+		}
+	}
+}

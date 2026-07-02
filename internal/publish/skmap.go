@@ -98,8 +98,12 @@ func normalizeGrainPart(vals []interface{}, col int, norm grainNorm) string {
 		return s
 	case grainNormFold:
 		raw := strings.TrimSpace(fmt.Sprint(vals[col]))
-		vals[col] = raw
-		return strings.ToUpper(raw)
+		if raw == "<nil>" {
+			raw = ""
+		}
+		folded := strings.ToUpper(raw)
+		vals[col] = folded
+		return folded
 	case grainNormTagKey:
 		raw := truncateRunes(strings.TrimSpace(fmt.Sprint(vals[col])), 256)
 		vals[col] = raw
@@ -130,6 +134,9 @@ func normalizeGrainPart(vals []interface{}, col int, norm grainNorm) string {
 }
 
 func normalizeDateKey(v interface{}) string {
+	if v == nil {
+		return ""
+	}
 	s := strings.TrimSpace(fmt.Sprint(v))
 	if s == "<nil>" {
 		return ""

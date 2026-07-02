@@ -303,6 +303,8 @@ func copyAggTableRemapped(ctx context.Context, local *sql.DB, serverTx *sql.Tx, 
 		return 0, err
 	}
 
+	merged = consolidateAggRows(merged, spec)
+
 	var batch [][]interface{}
 	total := 0
 	prefix := fmt.Sprintf(`INSERT INTO %s (%s) VALUES `, spec.table, spec.serverCols)

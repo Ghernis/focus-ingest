@@ -4,7 +4,7 @@
       "provider": "AZURE",
       "service_name": "Virtual Machines",
       "line_match_regex": "Compute Hour",
-      "tier_extract_regex": "^([A-Z]\\d+[a-z]*s?\\s*v\\d+)$",
+      "tier_extract_regex": "(?i)^([A-Z]\\d+[a-z]*(?:ms|ls|s|ds|as|ads|pds)?(?:\\s+v\\d+)?)$",
       "tier_rank_mode": "numeric_suffix",
       "priority": 10
     },
@@ -12,7 +12,7 @@
       "provider": "AZURE",
       "service_name": "Azure Reservations",
       "line_match_regex": "Compute Hour",
-      "tier_extract_regex": "^([A-Z]\\d+[a-z]*s?\\s*v\\d+)$",
+      "tier_extract_regex": "(?i)^([A-Z]\\d+[a-z]*(?:ms|ls|s|ds|as|ads|pds)?(?:\\s+v\\d+)?)$",
       "tier_rank_mode": "numeric_suffix",
       "priority": 11
     },
@@ -20,7 +20,7 @@
       "provider": "AZURE",
       "service_name": "Virtual Machine Scale Sets",
       "line_match_regex": "Compute Hour",
-      "tier_extract_regex": "^([A-Z]\\d+[a-z]*s?\\s*v\\d+)$",
+      "tier_extract_regex": "(?i)^([A-Z]\\d+[a-z]*(?:ms|ls|s|ds|as|ads|pds)?(?:\\s+v\\d+)?)$",
       "tier_rank_mode": "numeric_suffix",
       "priority": 12
     },

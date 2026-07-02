@@ -39,7 +39,41 @@ func TestTierRules_AzureReservationsVM(t *testing.T) {
 	}
 }
 
+func TestTierRules_B2msBurstableVM(t *testing.T) {
+	resetTierRulesEngine()
+	engine, err := loadTierRulesEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	match, ok := engine.matchSKU("AZURE", "Virtual Machines", "DZH318Z0BQ35_00K2_1 Compute Hour", "B2ms")
+	if !ok {
+		t.Fatal("expected B2ms tier match from real VM staging data")
+	}
+	if match.TierCode != "B2ms" {
+		t.Fatalf("tier_code=%q", match.TierCode)
+	}
+	if match.TierRank <= 0 {
+		t.Fatalf("tier_rank=%d", match.TierRank)
+	}
+}
+
+func TestTierRules_SlashMeterForm(t *testing.T) {
+	resetTierRulesEngine()
+	engine, err := loadTierRulesEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	match, ok := engine.matchSKU("AZURE", "Virtual Machines", "X_1 Compute Hour", "D4 v3/D4s v3")
+	if !ok {
+		t.Fatal("expected slash-form meter to match")
+	}
+	if match.TierCode != "D4s v3" {
+		t.Fatalf("tier_code=%q", match.TierCode)
+	}
+}
+
 func TestTierRules_SameSkuIdDifferentMeter(t *testing.T) {
+	resetTierRulesEngine()
 	engine, err := loadTierRulesEngine()
 	if err != nil {
 		t.Fatal(err)
