@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/ghernis/focus_dt/internal/focus"
 )
@@ -24,6 +25,11 @@ type tierDayTierKey struct {
 }
 
 func (p *Processor) buildFactResourceTierDaily(ctx context.Context, tx *sql.Tx, month string) ([]tierDailyRow, error) {
+	engine, err := loadTierRulesEngine()
+	if err != nil {
+		return nil, err
+	}
+
 	effective := p.castCost("f.effective_cost")
 	qty := p.castCost("f.pricing_quantity")
 	appSK := p.applicationSKExpr()
@@ -31,22 +37,25 @@ func (p *Processor) buildFactResourceTierDaily(ctx context.Context, tx *sql.Tx, 
 	joins := p.appContextJoins()
 	subJoin := p.subAccountJoin()
 	monthFilter := p.monthEq("f.billing_period_start", month)
+	serviceNameExpr := `COALESCE(NULLIF(TRIM(svc.service_name), ''), NULLIF(TRIM(s.service_name), ''), '')`
 
 	q := fmt.Sprintf(`
 		SELECT f.charge_date, f.billing_period_start, a.provider, f.resource_sk, f.service_sk, %s, %s,
-		  s.tier_code, s.tier_rank, f.sku_sk, SUM(%s), SUM(%s)
+		  f.sku_sk, %s, s.sku_price_id, s.sku_meter, s.tier_code, s.tier_rank, s.is_tier_meter,
+		  SUM(%s), SUM(%s)
 		FROM fact_focus_cost_daily f
 		%s
 		%s
 		%s
-		INNER JOIN dim_sku s ON f.sku_sk = s.sku_sk AND s.is_tier_meter = 1
+		INNER JOIN dim_sku s ON f.sku_sk = s.sku_sk
+		INNER JOIN dim_service svc ON f.service_sk = svc.service_sk
 		WHERE f.sub_account_sk IS NOT NULL
 		  AND f.resource_sk IS NOT NULL
 		  AND f.sku_sk IS NOT NULL
 		  AND %s
 		GROUP BY f.charge_date, f.billing_period_start, a.provider, f.resource_sk, f.service_sk, %s, %s,
-		  s.tier_code, s.tier_rank, f.sku_sk`,
-		appSK, env, effective, qty, subJoin, joins, p.applicationDimJoin(), monthFilter, appSK, env)
+		  f.sku_sk, %s, s.sku_price_id, s.sku_meter, s.tier_code, s.tier_rank, s.is_tier_meter`,
+		appSK, env, serviceNameExpr, effective, qty, subJoin, joins, p.applicationDimJoin(), monthFilter, appSK, env, serviceNameExpr)
 
 	rows, err := tx.QueryContext(ctx, q)
 	if err != nil {
@@ -56,13 +65,28 @@ func (p *Processor) buildFactResourceTierDaily(ctx context.Context, tx *sql.Tx, 
 
 	byTier := map[tierDayTierKey]tierDailyRow{}
 	for rows.Next() {
-		var chargeDate, billingMonth, provider, tierCode, environment string
+		var chargeDate, billingMonth, provider, environment, serviceName, skuPriceID, skuMeter string
 		var resourceSK, serviceSK, appSKVal, skuSK int64
-		var tierRank int
+		var storedTierCode sql.NullString
+		var storedTierRank sql.NullInt32
+		var isTierMeter interface{}
 		var costStr, qtyStr string
 		if err := rows.Scan(&chargeDate, &billingMonth, &provider, &resourceSK, &serviceSK, &appSKVal, &environment,
-			&tierCode, &tierRank, &skuSK, &costStr, &qtyStr); err != nil {
+			&skuSK, &serviceName, &skuPriceID, &skuMeter, &storedTierCode, &storedTierRank, &isTierMeter, &costStr, &qtyStr); err != nil {
 			return nil, err
+		}
+		tierCode, tierRank, ok := resolveTierForFact(
+			engine,
+			provider,
+			serviceName,
+			skuPriceID,
+			skuMeter,
+			storedTierCode.String,
+			int(storedTierRank.Int32),
+			isTierMeterTruthy(isTierMeter),
+		)
+		if !ok {
+			continue
 		}
 		k := tierDayTierKey{
 			tierDayKey: tierDayKey{
@@ -99,6 +123,42 @@ func (p *Processor) buildFactResourceTierDaily(ctx context.Context, tx *sql.Tx, 
 		return nil, err
 	}
 	return dominant, nil
+}
+
+func resolveTierForFact(engine *tierRulesEngine, provider, serviceName, skuPriceID, skuMeter, storedTierCode string, storedTierRank int, storedTierMeter bool) (string, int, bool) {
+	storedTierCode = strings.TrimSpace(storedTierCode)
+	if storedTierMeter && storedTierCode != "" {
+		return storedTierCode, storedTierRank, true
+	}
+	match, ok := engine.matchSKU(provider, serviceName, skuPriceID, skuMeter)
+	if !ok {
+		return "", 0, false
+	}
+	return match.TierCode, match.TierRank, true
+}
+
+func isTierMeterTruthy(v interface{}) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case int64:
+		return t != 0
+	case int32:
+		return t != 0
+	case int:
+		return t != 0
+	case float64:
+		return t != 0
+	case []byte:
+		s := strings.TrimSpace(string(t))
+		return s == "1" || strings.EqualFold(s, "true")
+	case string:
+		s := strings.TrimSpace(t)
+		return s == "1" || strings.EqualFold(s, "true")
+	default:
+		s := strings.TrimSpace(fmt.Sprint(v))
+		return s == "1" || strings.EqualFold(s, "true")
+	}
 }
 
 func pickDominantTierDaily(byTier map[tierDayTierKey]tierDailyRow) []tierDailyRow {

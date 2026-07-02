@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/ghernis/focus_dt/internal/focus"
 )
 
 //go:embed tier_rules.json
@@ -108,10 +110,25 @@ func tierRankKey(provider, serviceName, tierCode string) string {
 }
 
 func (e *tierRulesEngine) matchSKU(provider, serviceName, skuPriceID, skuMeter string) (skuTierMatch, bool) {
+	provider = normalizeTierProvider(provider)
+	if provider == "" {
+		return skuTierMatch{}, false
+	}
 	if match, ok := e.matchSKURules(provider, strings.TrimSpace(serviceName), skuPriceID, skuMeter, true); ok {
 		return match, true
 	}
 	return e.matchSKURules(provider, serviceName, skuPriceID, skuMeter, false)
+}
+
+func normalizeTierProvider(raw string) string {
+	if p := focus.NormalizeProvider(raw); p != "" {
+		return p
+	}
+	switch strings.ToUpper(strings.TrimSpace(raw)) {
+	case "AZURE", "AWS", "GCP":
+		return strings.ToUpper(strings.TrimSpace(raw))
+	}
+	return ""
 }
 
 func (e *tierRulesEngine) matchSKURules(provider, serviceName, skuPriceID, skuMeter string, requireService bool) (skuTierMatch, bool) {

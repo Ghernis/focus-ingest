@@ -4,3 +4,4 @@ data
 *.exe
 focus_sample_*.csv
 ms_skus.json
+stg_example_vm.csv

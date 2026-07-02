@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 func (p *Processor) enrichSkuTier(ctx context.Context, tx *sql.Tx, provider, skuID, skuPriceID string) error {
@@ -36,6 +37,13 @@ func (p *Processor) enrichAllSkuTiers(ctx context.Context, tx *sql.Tx) error {
 	if err := p.backfillSkuServiceNames(ctx, tx); err != nil {
 		return fmt.Errorf("backfill sku service names: %w", err)
 	}
+	if err := p.repairSkuTierFlags(ctx, tx); err != nil {
+		return fmt.Errorf("repair sku tier flags: %w", err)
+	}
+	serviceBySKU, err := p.loadDominantServiceNameBySKU(ctx, tx)
+	if err != nil {
+		return fmt.Errorf("load sku service names: %w", err)
+	}
 	engine, err := loadTierRulesEngine()
 	if err != nil {
 		return err
@@ -58,7 +66,11 @@ func (p *Processor) enrichAllSkuTiers(ctx context.Context, tx *sql.Tx) error {
 		if err := rows.Scan(&sk, &provider, &serviceName, &skuPriceID, &skuMeter); err != nil {
 			return err
 		}
-		match, ok := engine.matchSKU(provider, serviceName.String, skuPriceID.String, skuMeter.String)
+		svcName := serviceName.String
+		if dominant := strings.TrimSpace(serviceBySKU[sk]); dominant != "" && (svcName == "" || strings.EqualFold(svcName, "UNKNOWN")) {
+			svcName = dominant
+		}
+		match, ok := engine.matchSKU(provider, svcName, skuPriceID.String, skuMeter.String)
 		if !ok {
 			if _, err := tx.ExecContext(ctx, p.q(updateSQL), nil, nil, 0, sk); err != nil {
 				return fmt.Errorf("sku_sk %d: %w", sk, err)
@@ -101,4 +113,60 @@ func (p *Processor) backfillSkuServiceNames(ctx context.Context, tx *sql.Tx) err
 		)
 		WHERE service_name IS NULL OR TRIM(service_name) = '' OR TRIM(service_name) = 'UNKNOWN'`)
 	return err
+}
+
+func (p *Processor) repairSkuTierFlags(ctx context.Context, tx *sql.Tx) error {
+	q := `UPDATE dim_sku SET is_tier_meter = 1 WHERE tier_code IS NOT NULL AND TRIM(tier_code) <> '' AND IFNULL(is_tier_meter, 0) = 0`
+	if p.Dialect == "sqlserver" {
+		q = `UPDATE dim_sku SET is_tier_meter = 1 WHERE tier_code IS NOT NULL AND LTRIM(RTRIM(tier_code)) <> '' AND ISNULL(is_tier_meter, 0) = 0`
+	}
+	_, err := tx.ExecContext(ctx, q)
+	return err
+}
+
+func (p *Processor) loadDominantServiceNameBySKU(ctx context.Context, tx *sql.Tx) (map[int64]string, error) {
+	out := map[int64]string{}
+	var q string
+	if p.Dialect == "sqlserver" {
+		q = `
+			SELECT sku_sk, service_name FROM (
+				SELECT f.sku_sk, svc.service_name,
+					ROW_NUMBER() OVER (PARTITION BY f.sku_sk ORDER BY COUNT(*) DESC, svc.service_name) AS rn
+				FROM fact_focus_cost_daily f
+				INNER JOIN dim_service svc ON f.service_sk = svc.service_sk
+				WHERE f.sku_sk IS NOT NULL
+				GROUP BY f.sku_sk, svc.service_name
+			) x WHERE rn = 1`
+	} else {
+		q = `
+			SELECT f.sku_sk, svc.service_name
+			FROM fact_focus_cost_daily f
+			INNER JOIN dim_service svc ON f.service_sk = svc.service_sk
+			WHERE f.sku_sk IS NOT NULL
+			GROUP BY f.sku_sk, svc.service_name
+			HAVING COUNT(*) = (
+				SELECT MAX(cnt) FROM (
+					SELECT COUNT(*) AS cnt
+					FROM fact_focus_cost_daily f2
+					WHERE f2.sku_sk = f.sku_sk
+					GROUP BY f2.service_sk
+				)
+			)`
+	}
+	rows, err := tx.QueryContext(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var sk int64
+		var name string
+		if err := rows.Scan(&sk, &name); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(name) != "" {
+			out[sk] = strings.TrimSpace(name)
+		}
+	}
+	return out, rows.Err()
 }
