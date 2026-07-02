@@ -46,6 +46,9 @@ func (p *Processor) rebuildAggregatesForMonth(ctx context.Context, tx *sql.Tx, m
 	if err := p.insertAppAggregatesForMonth(ctx, tx, month); err != nil {
 		return err
 	}
+	if err := p.enrichAllSkuTiers(ctx, tx); err != nil {
+		return fmt.Errorf("enrich sku tiers: %w", err)
+	}
 	if err := p.rebuildTierForMonth(ctx, tx, month); err != nil {
 		return err
 	}

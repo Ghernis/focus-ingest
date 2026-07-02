@@ -14,9 +14,6 @@ func (p *Processor) rebuildTierForMonth(ctx context.Context, tx *sql.Tx, month s
 	if month == "" {
 		return nil
 	}
-	if err := p.enrichAllSkuTiers(ctx, tx); err != nil {
-		return fmt.Errorf("enrich sku tiers: %w", err)
-	}
 	if err := p.deleteTierForMonth(ctx, tx, month); err != nil {
 		return err
 	}
@@ -36,6 +33,9 @@ func (p *Processor) rebuildTierForMonth(ctx context.Context, tx *sql.Tx, month s
 }
 
 func (p *Processor) rebuildTierAllMonths(ctx context.Context, tx *sql.Tx) error {
+	if err := p.enrichAllSkuTiers(ctx, tx); err != nil {
+		return fmt.Errorf("enrich sku tiers: %w", err)
+	}
 	months, err := p.distinctFactBillingMonths(ctx, tx)
 	if err != nil {
 		return err

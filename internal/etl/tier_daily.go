@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ghernis/focus_dt/internal/focus"
+	"github.com/ghernis/focus_dt/internal/sqlserver"
 )
 
 type tierDayKey struct {
@@ -194,25 +195,81 @@ func pickDominantTierDaily(byTier map[tierDayTierKey]tierDailyRow) []tierDailyRo
 }
 
 func (p *Processor) insertTierDailyRows(ctx context.Context, tx *sql.Tx, rows []tierDailyRow, refreshed interface{}) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	const tierDailyCols = 14
 	insertSQL := `INSERT INTO fact_resource_tier_daily (
 		charge_date, billing_period_start, provider, resource_sk, service_sk, application_sk, environment,
 		tier_code, tier_rank, tier_sku_sk, tier_unit_rate, tier_cost, tier_qty, refreshed_utc
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+	) VALUES `
 	if p.Dialect == "sqlserver" {
-		insertSQL = `INSERT INTO fact_resource_tier_daily (
+		chunk := sqlserver.ChunkRows(tierDailyCols)
+		for start := 0; start < len(rows); start += chunk {
+			end := start + chunk
+			if end > len(rows) {
+				end = len(rows)
+			}
+			if err := p.insertTierDailyChunk(ctx, tx, rows[start:end], refreshed, insertSQL); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	oneRow := `INSERT INTO fact_resource_tier_daily (
 		charge_date, billing_period_start, provider, resource_sk, service_sk, application_sk, environment,
 		tier_code, tier_rank, tier_sku_sk, tier_unit_rate, tier_cost, tier_qty, refreshed_utc
-	) VALUES (@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14)`
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+	stmt, err := tx.PrepareContext(ctx, oneRow)
+	if err != nil {
+		return err
 	}
+	defer stmt.Close()
 	for _, r := range rows {
-		_, err := tx.ExecContext(ctx, p.q(insertSQL),
+		if _, err := stmt.ExecContext(ctx,
+			r.chargeDate, r.billingMonth, r.provider, r.resourceSK, r.serviceSK, r.applicationSK, r.environment,
+			r.tierCode, r.tierRank, r.tierSkuSK,
+			formatCost(r.tierUnitRate), formatCost(r.tierCost), formatCost(r.tierQty), refreshed,
+		); err != nil {
+			return fmt.Errorf("fact_resource_tier_daily: %w", err)
+		}
+	}
+	return nil
+}
+
+func (p *Processor) insertTierDailyChunk(ctx context.Context, tx *sql.Tx, rows []tierDailyRow, refreshed interface{}, prefix string) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	const tierDailyCols = 14
+	var b strings.Builder
+	b.WriteString(prefix)
+	args := make([]interface{}, 0, len(rows)*tierDailyCols)
+	n := 1
+	for i, r := range rows {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteByte('(')
+		for c := 0; c < tierDailyCols; c++ {
+			if c > 0 {
+				b.WriteByte(',')
+			}
+			fmt.Fprintf(&b, "@p%d", n)
+			n++
+		}
+		b.WriteByte(')')
+		args = append(args,
 			r.chargeDate, r.billingMonth, r.provider, r.resourceSK, r.serviceSK, r.applicationSK, r.environment,
 			r.tierCode, r.tierRank, r.tierSkuSK,
 			formatCost(r.tierUnitRate), formatCost(r.tierCost), formatCost(r.tierQty), refreshed,
 		)
-		if err != nil {
-			return fmt.Errorf("fact_resource_tier_daily: %w", err)
-		}
+	}
+	if err := sqlserver.CheckParamCount(len(args)); err != nil {
+		return fmt.Errorf("fact_resource_tier_daily chunk (%d rows): %w", len(rows), err)
+	}
+	if _, err := tx.ExecContext(ctx, b.String(), args...); err != nil {
+		return fmt.Errorf("fact_resource_tier_daily: %w", err)
 	}
 	return nil
 }

@@ -48,7 +48,16 @@ func (p *Processor) enrichAllSkuTiers(ctx context.Context, tx *sql.Tx) error {
 	if err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT sku_sk, provider, service_name, sku_price_id, sku_meter FROM dim_sku`)
+
+	skuSelect := `SELECT s.sku_sk, s.provider, s.service_name, s.sku_price_id, s.sku_meter, s.tier_code, s.tier_rank, s.is_tier_meter
+		FROM dim_sku s
+		WHERE EXISTS (SELECT 1 FROM fact_focus_cost_daily f WHERE f.sku_sk = s.sku_sk)`
+	if p.Dialect == "sqlserver" {
+		skuSelect = `SELECT s.sku_sk, s.provider, s.service_name, s.sku_price_id, s.sku_meter, s.tier_code, s.tier_rank, s.is_tier_meter
+		FROM dim_sku s
+		WHERE EXISTS (SELECT 1 FROM fact_focus_cost_daily f WHERE f.sku_sk = s.sku_sk)`
+	}
+	rows, err := tx.QueryContext(ctx, skuSelect)
 	if err != nil {
 		return err
 	}
@@ -62,8 +71,10 @@ func (p *Processor) enrichAllSkuTiers(ctx context.Context, tx *sql.Tx) error {
 	for rows.Next() {
 		var sk int64
 		var provider string
-		var serviceName, skuPriceID, skuMeter sql.NullString
-		if err := rows.Scan(&sk, &provider, &serviceName, &skuPriceID, &skuMeter); err != nil {
+		var serviceName, skuPriceID, skuMeter, storedTierCode sql.NullString
+		var storedTierRank sql.NullInt32
+		var storedTierMeter interface{}
+		if err := rows.Scan(&sk, &provider, &serviceName, &skuPriceID, &skuMeter, &storedTierCode, &storedTierRank, &storedTierMeter); err != nil {
 			return err
 		}
 		svcName := serviceName.String
@@ -71,17 +82,65 @@ func (p *Processor) enrichAllSkuTiers(ctx context.Context, tx *sql.Tx) error {
 			svcName = dominant
 		}
 		match, ok := engine.matchSKU(provider, svcName, skuPriceID.String, skuMeter.String)
-		if !ok {
-			if _, err := tx.ExecContext(ctx, p.q(updateSQL), nil, nil, 0, sk); err != nil {
-				return fmt.Errorf("sku_sk %d: %w", sk, err)
-			}
+		var newCode interface{}
+		var newRank interface{}
+		var newMeter int
+		if ok {
+			newCode = match.TierCode
+			newRank = match.TierRank
+			newMeter = 1
+		} else {
+			newCode = nil
+			newRank = nil
+			newMeter = 0
+		}
+		if skuTierFlagsEqual(storedTierCode, storedTierRank, storedTierMeter, newCode, newRank, newMeter) {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, p.q(updateSQL), match.TierCode, match.TierRank, 1, sk); err != nil {
+		if _, err := tx.ExecContext(ctx, p.q(updateSQL), newCode, newRank, newMeter, sk); err != nil {
 			return fmt.Errorf("sku_sk %d: %w", sk, err)
 		}
 	}
 	return rows.Err()
+}
+
+func skuTierFlagsEqual(storedCode sql.NullString, storedRank sql.NullInt32, storedMeter interface{}, newCode, newRank interface{}, newMeter int) bool {
+	var wantCode string
+	if newCode != nil {
+		wantCode = strings.TrimSpace(fmt.Sprint(newCode))
+	}
+	haveCode := strings.TrimSpace(storedCode.String)
+	if !storedCode.Valid {
+		haveCode = ""
+	}
+	if haveCode != wantCode {
+		return false
+	}
+	wantRank := 0
+	if newRank != nil {
+		wantRank = intFromInterface(newRank)
+	}
+	haveRank := 0
+	if storedRank.Valid {
+		haveRank = int(storedRank.Int32)
+	}
+	if haveRank != wantRank {
+		return false
+	}
+	return isTierMeterTruthy(storedMeter) == (newMeter != 0)
+}
+
+func intFromInterface(v interface{}) int {
+	switch t := v.(type) {
+	case int:
+		return t
+	case int32:
+		return int(t)
+	case int64:
+		return int(t)
+	default:
+		return 0
+	}
 }
 
 func (p *Processor) backfillSkuServiceNames(ctx context.Context, tx *sql.Tx) error {
