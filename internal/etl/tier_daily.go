@@ -65,8 +65,9 @@ func (p *Processor) buildFactResourceTierDaily(ctx context.Context, tx *sql.Tx, 
 
 	byTier := map[tierDayTierKey]tierDailyRow{}
 	for rows.Next() {
-		var chargeDate, billingMonth, provider, environment, serviceName, skuPriceID, skuMeter string
+		var chargeDate, billingMonth, provider, environment, serviceName string
 		var resourceSK, serviceSK, appSKVal, skuSK int64
+		var skuPriceID, skuMeter sql.NullString
 		var storedTierCode sql.NullString
 		var storedTierRank sql.NullInt32
 		var isTierMeter interface{}
@@ -79,8 +80,8 @@ func (p *Processor) buildFactResourceTierDaily(ctx context.Context, tx *sql.Tx, 
 			engine,
 			provider,
 			serviceName,
-			skuPriceID,
-			skuMeter,
+			skuPriceID.String,
+			skuMeter.String,
 			storedTierCode.String,
 			int(storedTierRank.Int32),
 			isTierMeterTruthy(isTierMeter),
