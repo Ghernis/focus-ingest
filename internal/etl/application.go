@@ -249,7 +249,7 @@ func (p *Processor) syncApplicationsFromFactsForMonth(ctx context.Context, tx *s
 		FROM fact_focus_cost_daily f
 		%s
 		WHERE %s
-		GROUP BY %s`, p.rawApplicationExpr(), joins, monthEq("f.billing_period_start", month), p.rawApplicationExpr())
+		GROUP BY %s`, p.rawApplicationExpr(), joins, p.monthEq("f.billing_period_start", month), p.rawApplicationExpr())
 	return p.syncApplicationsFromQuery(ctx, tx, q)
 }
 

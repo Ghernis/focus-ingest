@@ -85,7 +85,7 @@ func (p *Processor) backfillSkuServiceNames(ctx context.Context, tx *sql.Tx) err
 				WHERE svc.service_name IS NOT NULL AND LTRIM(RTRIM(svc.service_name)) <> ''
 				GROUP BY f.sku_sk, svc.service_name
 			) d ON s.sku_sk = d.sku_sk AND d.rn = 1
-			WHERE s.service_name IS NULL OR LTRIM(RTRIM(s.service_name)) = ''`)
+			WHERE s.service_name IS NULL OR LTRIM(RTRIM(s.service_name)) = '' OR LTRIM(RTRIM(s.service_name)) = 'UNKNOWN'`)
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `
@@ -99,6 +99,6 @@ func (p *Processor) backfillSkuServiceNames(ctx context.Context, tx *sql.Tx) err
 			ORDER BY COUNT(*) DESC, svc.service_name
 			LIMIT 1
 		)
-		WHERE service_name IS NULL OR TRIM(service_name) = ''`)
+		WHERE service_name IS NULL OR TRIM(service_name) = '' OR TRIM(service_name) = 'UNKNOWN'`)
 	return err
 }

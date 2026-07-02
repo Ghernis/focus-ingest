@@ -108,11 +108,18 @@ func tierRankKey(provider, serviceName, tierCode string) string {
 }
 
 func (e *tierRulesEngine) matchSKU(provider, serviceName, skuPriceID, skuMeter string) (skuTierMatch, bool) {
+	if match, ok := e.matchSKURules(provider, strings.TrimSpace(serviceName), skuPriceID, skuMeter, true); ok {
+		return match, true
+	}
+	return e.matchSKURules(provider, serviceName, skuPriceID, skuMeter, false)
+}
+
+func (e *tierRulesEngine) matchSKURules(provider, serviceName, skuPriceID, skuMeter string, requireService bool) (skuTierMatch, bool) {
 	for _, rule := range e.rules {
 		if !strings.EqualFold(rule.Provider, provider) {
 			continue
 		}
-		if strings.TrimSpace(rule.ServiceName) != strings.TrimSpace(serviceName) {
+		if requireService && strings.TrimSpace(rule.ServiceName) != serviceName {
 			continue
 		}
 		if !ruleMatchesLine(rule, skuPriceID, skuMeter) {
@@ -120,7 +127,7 @@ func (e *tierRulesEngine) matchSKU(provider, serviceName, skuPriceID, skuMeter s
 		}
 		code, ok := extractTierCode(rule.tierExtract, skuMeter)
 		if !ok {
-			return skuTierMatch{}, false
+			continue
 		}
 		rank := e.tierRank(rule, code)
 		return skuTierMatch{TierCode: code, TierRank: rank}, true

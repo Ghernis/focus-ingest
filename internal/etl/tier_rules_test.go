@@ -124,6 +124,21 @@ func TestTierRules_SQLMIStorageIgnored(t *testing.T) {
 	}
 }
 
+func TestTierRules_FallbackWithoutServiceName(t *testing.T) {
+	resetTierRulesEngine()
+	engine, err := loadTierRulesEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	match, ok := engine.matchSKU("AZURE", "UNKNOWN", "DZH318Z0BQ35_00K2_1 Compute Hour", "B2ms")
+	if !ok {
+		t.Fatal("expected provider-level fallback match")
+	}
+	if match.TierCode != "B2ms" {
+		t.Fatalf("tier_code=%q", match.TierCode)
+	}
+}
+
 func TestTierChangeDirection_RankBased(t *testing.T) {
 	if got := tierChangeDirection(680404, 680204, 0, 0); got != changeDownsize {
 		t.Fatalf("got %s", got)

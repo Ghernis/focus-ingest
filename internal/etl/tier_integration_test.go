@@ -174,6 +174,61 @@ func TestTierChange_CrossServiceNoise(t *testing.T) {
 	}
 }
 
+func TestTierDaily_B2msVM(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	path := filepath.Join(t.TempDir(), "tier_b2ms.db")
+	s, err := store.OpenSQLite(path, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.ApplySchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Real staging shape from stg_example_vm.csv: B2ms on Compute Hour lines.
+	for _, day := range []string{"2026-01-09", "2026-01-10", "2026-01-11", "2026-01-29", "2026-01-30"} {
+		importAzureVMRow(ctx, t, s, "vm-"+day+".parquet", day, "2026-01-01", "slpazrusadm03",
+			"DZH318Z0BQ35", "DZH318Z0BQ35_00K2_1 Compute Hour", "B2ms", "24", "1.67")
+	}
+
+	if _, err := s.RebuildAggregates(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+
+	db := openTierTestDB(t, path)
+	defer db.Close()
+
+	var tierSkus int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM dim_sku WHERE is_tier_meter = 1`).Scan(&tierSkus); err != nil {
+		t.Fatal(err)
+	}
+	if tierSkus == 0 {
+		t.Fatal("expected tier-capable SKUs in dim_sku")
+	}
+
+	var dailyRows int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM fact_resource_tier_daily WHERE billing_period_start LIKE '2026-01%'`).Scan(&dailyRows); err != nil {
+		t.Fatal(err)
+	}
+	if dailyRows == 0 {
+		t.Fatal("expected fact_resource_tier_daily rows for B2ms VM month")
+	}
+
+	var tierCode string
+	if err := db.QueryRowContext(ctx, `
+		SELECT tier_code FROM fact_resource_tier_daily d
+		INNER JOIN dim_resource r ON d.resource_sk = r.resource_sk
+		WHERE r.global_resource_id = 'slpazrusadm03' LIMIT 1`).Scan(&tierCode); err != nil {
+		t.Fatal(err)
+	}
+	if tierCode != "B2ms" {
+		t.Fatalf("tier_code=%q want B2ms", tierCode)
+	}
+}
+
 func importAzureVMRow(ctx context.Context, t *testing.T, s store.Store, file, chargeDate, billingMonth, resourceID, skuID, skuPriceID, skuMeter, qty, cost string) {
 	importAzureServiceRow(ctx, t, s, file, chargeDate, billingMonth, resourceID, skuID, skuPriceID, skuMeter, qty, cost, "Virtual Machines")
 }

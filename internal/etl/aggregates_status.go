@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	"github.com/ghernis/focus_dt/internal/focus"
 )
 
 const (
@@ -107,7 +109,10 @@ func (p *Processor) billingMonthsForBatches(ctx context.Context, batchIDs []int6
 		if err := rows.Scan(&m); err != nil {
 			return nil, err
 		}
-		months = append(months, strings.TrimSpace(m))
+		m = focus.DateOnly(strings.TrimSpace(m))
+		if m != "" {
+			months = append(months, m)
+		}
 	}
 	return months, rows.Err()
 }
@@ -170,6 +175,14 @@ func inClausePlaceholders(dialect string, ids []int64, startAt int) (string, []i
 	return strings.Join(ph, ","), args
 }
 
-func monthEq(column, month string) string {
-	return fmt.Sprintf("%s = '%s'", column, strings.ReplaceAll(month, "'", "''"))
+func (p *Processor) monthEq(column, month string) string {
+	month = focus.DateOnly(strings.TrimSpace(month))
+	if month == "" {
+		return "1=0"
+	}
+	escaped := strings.ReplaceAll(month, "'", "''")
+	if p.Dialect == "sqlserver" {
+		return fmt.Sprintf("CAST(%s AS DATE) = '%s'", column, escaped)
+	}
+	return fmt.Sprintf("substr(%s, 1, 10) = '%s'", column, escaped)
 }

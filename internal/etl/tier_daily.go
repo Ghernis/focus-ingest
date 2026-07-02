@@ -30,7 +30,7 @@ func (p *Processor) buildFactResourceTierDaily(ctx context.Context, tx *sql.Tx, 
 	env := p.environmentExpr()
 	joins := p.appContextJoins()
 	subJoin := p.subAccountJoin()
-	monthFilter := monthEq("f.billing_period_start", month)
+	monthFilter := p.monthEq("f.billing_period_start", month)
 
 	q := fmt.Sprintf(`
 		SELECT f.charge_date, f.billing_period_start, a.provider, f.resource_sk, f.service_sk, %s, %s,

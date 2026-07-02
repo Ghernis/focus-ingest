@@ -49,8 +49,8 @@ func (p *Processor) rebuildTierAllMonths(ctx context.Context, tx *sql.Tx) error 
 }
 
 func (p *Processor) deleteTierForMonth(ctx context.Context, tx *sql.Tx, month string) error {
-	m := monthEq("month_start", month)
-	bm := monthEq("billing_period_start", month)
+	m := p.monthEq("month_start", month)
+	bm := p.monthEq("billing_period_start", month)
 	for _, t := range []struct{ table, where string }{
 		{"fact_resource_tier_daily", bm},
 		{"fact_resource_tier_change", m},

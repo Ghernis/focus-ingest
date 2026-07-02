@@ -262,9 +262,9 @@ func copyDimRegion(ctx context.Context, src, dst *sql.DB) error {
 
 func copyDimSKU(ctx context.Context, src, dst *sql.DB) error {
 	return copyQuery(ctx, src, dst,
-		`SELECT sku_sk, provider, sku_id, sku_price_id, sku_meter, sku_price_details, service_name FROM dim_sku`,
-		`INSERT OR REPLACE INTO dim_sku (sku_sk, provider, sku_id, sku_price_id, sku_meter, sku_price_details, service_name) VALUES `,
-		7, func(r *sql.Rows) ([]interface{}, error) { return scanN(r, 7) })
+		`SELECT sku_sk, provider, sku_id, sku_price_id, sku_meter, sku_price_details, service_name, tier_code, tier_rank, is_tier_meter FROM dim_sku`,
+		`INSERT OR REPLACE INTO dim_sku (sku_sk, provider, sku_id, sku_price_id, sku_meter, sku_price_details, service_name, tier_code, tier_rank, is_tier_meter) VALUES `,
+		10, func(r *sql.Rows) ([]interface{}, error) { return scanN(r, 10) })
 }
 
 func copyDimChargeCategory(ctx context.Context, src, dst *sql.DB) error {

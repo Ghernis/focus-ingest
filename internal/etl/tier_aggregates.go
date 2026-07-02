@@ -23,7 +23,7 @@ func (p *Processor) insertTierChangeMonthlyAggs(ctx context.Context, tx *sql.Tx,
 		prior_tier_code, new_tier_code, prior_tier_sku_sk, new_tier_sku_sk,
 		prior_unit_rate, new_unit_rate, post_change_quantity,
 		realized_savings_unit, realized_savings_cost_delta, projected_annual_savings, change_direction
-		FROM fact_resource_tier_change WHERE change_scope = 'MOM' AND ` + monthEq("month_start", month)
+		FROM fact_resource_tier_change WHERE change_scope = 'MOM' AND ` + p.monthEq("month_start", month)
 	rows, err := tx.QueryContext(ctx, q)
 	if err != nil {
 		return err
@@ -70,7 +70,7 @@ func (p *Processor) insertTierChangeIntramonthAggs(ctx context.Context, tx *sql.
 		prior_tier_code, new_tier_code, prior_tier_sku_sk, new_tier_sku_sk,
 		days_on_prior_tier, days_on_new_tier, prior_unit_rate, new_unit_rate,
 		realized_savings_unit, realized_savings_cost_delta, projected_annual_savings, change_direction
-		FROM fact_resource_tier_change WHERE change_scope = 'INTRAMONTH' AND ` + monthEq("month_start", month)
+		FROM fact_resource_tier_change WHERE change_scope = 'INTRAMONTH' AND ` + p.monthEq("month_start", month)
 	rows, err := tx.QueryContext(ctx, q)
 	if err != nil {
 		return err
@@ -151,7 +151,7 @@ func (p *Processor) updateSavingsSummaryFromTierRollups(ctx context.Context, tx 
 		total_realized_savings_unit = 0,
 		total_realized_savings_cost_delta = 0,
 		rightsizing_change_count = 0
-		WHERE ` + monthEq("month_start", month)
+		WHERE ` + p.monthEq("month_start", month)
 	if _, err := tx.ExecContext(ctx, resetSQL); err != nil {
 		return err
 	}

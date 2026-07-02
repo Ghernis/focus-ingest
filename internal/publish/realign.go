@@ -206,8 +206,8 @@ var dimCopySQL = map[string]string{
 		SELECT ?, provider, service_code, service_name, service_category, service_subcategory FROM dim_service WHERE service_sk = ?`,
 	"dim_region": `INSERT OR IGNORE INTO dim_region (region_sk, provider, region_id, region_name)
 		SELECT ?, provider, region_id, region_name FROM dim_region WHERE region_sk = ?`,
-	"dim_sku": `INSERT OR IGNORE INTO dim_sku (sku_sk, provider, sku_id, sku_price_id, sku_meter, sku_price_details, service_name)
-		SELECT ?, provider, sku_id, sku_price_id, sku_meter, sku_price_details, service_name FROM dim_sku WHERE sku_sk = ?`,
+	"dim_sku": `INSERT OR IGNORE INTO dim_sku (sku_sk, provider, sku_id, sku_price_id, sku_meter, sku_price_details, service_name, tier_code, tier_rank, is_tier_meter)
+		SELECT ?, provider, sku_id, sku_price_id, sku_meter, sku_price_details, service_name, tier_code, tier_rank, is_tier_meter FROM dim_sku WHERE sku_sk = ?`,
 	"dim_commitment_discount": `INSERT OR IGNORE INTO dim_commitment_discount (commitment_sk, provider, commitment_discount_id, commitment_discount_name,
 		commitment_discount_type, commitment_discount_category, commitment_discount_unit)
 		SELECT ?, provider, commitment_discount_id, commitment_discount_name, commitment_discount_type, commitment_discount_category, commitment_discount_unit

@@ -70,8 +70,8 @@ func (p *Processor) deleteAggregatesForMonth(ctx context.Context, tx *sql.Tx, mo
 	if len(skipAnomaly) > 0 {
 		skip = skipAnomaly[0]
 	}
-	m := monthEq("month_start", month)
-	bm := monthEq("billing_period_start", month)
+	m := p.monthEq("month_start", month)
+	bm := p.monthEq("billing_period_start", month)
 	tables := []struct {
 		table string
 		where string
@@ -114,7 +114,7 @@ func (p *Processor) insertCoreAggregatesForMonth(ctx context.Context, tx *sql.Tx
 	list := p.castCost("f.list_cost")
 	contracted := p.castCost("f.contracted_cost")
 	now := p.nowUTC()
-	monthFilter := monthEq("f.billing_period_start", month)
+	monthFilter := p.monthEq("f.billing_period_start", month)
 
 	dailySQL := fmt.Sprintf(`
 		INSERT INTO agg_cost_daily (
@@ -220,7 +220,7 @@ func (p *Processor) insertAppAggregatesForMonth(ctx context.Context, tx *sql.Tx,
 	appJoin := p.applicationDimJoin()
 	appSK := p.applicationSKExpr()
 	subJoin := p.subAccountJoin()
-	monthFilter := monthEq("f.billing_period_start", month)
+	monthFilter := p.monthEq("f.billing_period_start", month)
 
 	if err := p.ensureApplicationsForFactCanon(ctx, tx, monthFilter); err != nil {
 		return fmt.Errorf("ensure app dims: %w", err)

@@ -166,7 +166,7 @@ func (p *Processor) anomalyMonthSelectExpr() string {
 
 func (p *Processor) rebuildCostAnomaliesForMonth(ctx context.Context, tx *sql.Tx, month string) error {
 	month = normalizeAnomalyMonth(month)
-	if _, err := tx.ExecContext(ctx, `DELETE FROM agg_cost_anomaly_monthly WHERE `+monthEq("month_start", month)); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM agg_cost_anomaly_monthly WHERE `+p.monthEq("month_start", month)); err != nil {
 		return fmt.Errorf("delete anomalies: %w", err)
 	}
 	if err := p.rebuildAppAnomalies(ctx, tx, month); err != nil {
@@ -193,7 +193,7 @@ func (p *Processor) rebuildAppAnomalies(ctx context.Context, tx *sql.Tx, onlyMon
 	if onlyMonth != "" {
 		scope = fmt.Sprintf(`WHERE application_sk IN (
 			SELECT DISTINCT application_sk FROM agg_app_monthly WHERE %s
-		)`, monthEq("month_start", onlyMonth))
+		)`, p.monthEq("month_start", onlyMonth))
 	}
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
 		SELECT %s AS month_start, provider, application_sk, SUM(%s)
@@ -246,7 +246,7 @@ func (p *Processor) rebuildServiceAnomalies(ctx context.Context, tx *sql.Tx, onl
 	if onlyMonth != "" {
 		scope = fmt.Sprintf(`WHERE application_sk IN (
 			SELECT DISTINCT application_sk FROM agg_app_service_monthly WHERE %s
-		)`, monthEq("month_start", onlyMonth))
+		)`, p.monthEq("month_start", onlyMonth))
 	}
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
 		SELECT %s AS month_start, provider, application_sk, service_sk, SUM(%s)

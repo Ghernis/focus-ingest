@@ -168,7 +168,7 @@ func (p *Processor) RebuildCostDistributionForMonth(ctx context.Context, tx *sql
 }
 
 func (p *Processor) rebuildCostDistributionForMonth(ctx context.Context, tx *sql.Tx, month string) error {
-	return p.rebuildCostDistributionFiltered(ctx, tx, monthEq("month_start", month))
+	return p.rebuildCostDistributionFiltered(ctx, tx, p.monthEq("month_start", month))
 }
 
 func (p *Processor) rebuildCostDistribution(ctx context.Context, tx *sql.Tx) error {

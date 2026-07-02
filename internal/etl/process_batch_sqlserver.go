@@ -39,6 +39,9 @@ func (p *Processor) processBatchSQLServer(ctx context.Context, batchID int64, fo
 		}
 		return fmt.Errorf("sql etl: %w", err)
 	}
+	if err := p.enrichAllSkuTiers(ctx, tx); err != nil {
+		return fmt.Errorf("enrich sku tiers: %w", err)
+	}
 	if !p.SkipAggregates {
 		if err := p.rebuildAggregates(ctx, tx, nil); err != nil {
 			return err
