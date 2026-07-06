@@ -3,6 +3,7 @@ package etl
 import (
 	_ "embed"
 	"encoding/json"
+	"math"
 	"regexp"
 	"sort"
 	"strconv"
@@ -241,11 +242,14 @@ func vmNumericTierRank(tierCode string) int {
 }
 
 func tierChangeDirection(priorRank, newRank int, priorRate, newRate float64) string {
+	if priorRate > 0 && newRate > 0 && math.Abs(priorRate-newRate) > 1e-9 {
+		return changeDirection(priorRate, newRate)
+	}
 	if priorRank > 0 && newRank > 0 && priorRank != newRank {
 		if priorRank > newRank {
 			return changeDownsize
 		}
 		return changeUpsize
 	}
-	return changeDirection(priorRate, newRate)
+	return changeNeutral
 }

@@ -661,10 +661,13 @@ CREATE TABLE IF NOT EXISTS fact_resource_tier_change (
   prior_unit_rate                TEXT NOT NULL DEFAULT '0',
   new_unit_rate                  TEXT NOT NULL DEFAULT '0',
   post_change_quantity           TEXT NOT NULL DEFAULT '0',
+  total_qty_on_new_tier          TEXT NOT NULL DEFAULT '0',
+  counterfactual_cost_on_new_tier TEXT NOT NULL DEFAULT '0',
   days_on_prior_tier             INTEGER NOT NULL DEFAULT 0,
   days_on_new_tier               INTEGER NOT NULL DEFAULT 0,
   realized_savings_unit          TEXT NOT NULL DEFAULT '0',
   realized_savings_cost_delta    TEXT NOT NULL DEFAULT '0',
+  month_realized_savings         TEXT NOT NULL DEFAULT '0',
   projected_annual_savings     TEXT NOT NULL DEFAULT '0',
   change_direction               TEXT NOT NULL,
   refreshed_utc                  TEXT NOT NULL DEFAULT (datetime('now'))
@@ -686,8 +689,11 @@ CREATE TABLE IF NOT EXISTS agg_resource_tier_change_monthly (
   prior_unit_rate                     TEXT NOT NULL DEFAULT '0',
   new_unit_rate                       TEXT NOT NULL DEFAULT '0',
   post_change_quantity                TEXT NOT NULL DEFAULT '0',
+  total_qty_on_new_tier               TEXT NOT NULL DEFAULT '0',
+  counterfactual_cost_on_new_tier       TEXT NOT NULL DEFAULT '0',
   realized_savings_unit               TEXT NOT NULL DEFAULT '0',
   realized_savings_cost_delta         TEXT NOT NULL DEFAULT '0',
+  month_realized_savings              TEXT NOT NULL DEFAULT '0',
   projected_annual_savings            TEXT NOT NULL DEFAULT '0',
   change_direction                    TEXT NOT NULL,
   refreshed_utc                       TEXT NOT NULL DEFAULT (datetime('now')),
@@ -711,8 +717,12 @@ CREATE TABLE IF NOT EXISTS agg_resource_tier_change_intramonth (
   days_on_new_tier                       INTEGER NOT NULL DEFAULT 0,
   prior_unit_rate                        TEXT NOT NULL DEFAULT '0',
   new_unit_rate                          TEXT NOT NULL DEFAULT '0',
+  post_change_quantity                   TEXT NOT NULL DEFAULT '0',
+  total_qty_on_new_tier                  TEXT NOT NULL DEFAULT '0',
+  counterfactual_cost_on_new_tier        TEXT NOT NULL DEFAULT '0',
   realized_savings_unit                  TEXT NOT NULL DEFAULT '0',
   realized_savings_cost_delta            TEXT NOT NULL DEFAULT '0',
+  month_realized_savings                 TEXT NOT NULL DEFAULT '0',
   projected_annual_savings               TEXT NOT NULL DEFAULT '0',
   change_direction                       TEXT NOT NULL,
   refreshed_utc                          TEXT NOT NULL DEFAULT (datetime('now')),
@@ -1010,7 +1020,8 @@ SELECT
   r.prior_tier_sku_sk, ps.sku_meter AS prior_sku_meter,
   r.new_tier_sku_sk, ns.sku_meter AS new_sku_meter,
   r.prior_unit_rate, r.new_unit_rate, r.post_change_quantity,
-  r.realized_savings_unit, r.realized_savings_cost_delta, r.projected_annual_savings,
+  r.total_qty_on_new_tier, r.counterfactual_cost_on_new_tier,
+  r.realized_savings_unit, r.realized_savings_cost_delta, r.month_realized_savings, r.projected_annual_savings,
   r.change_direction, r.refreshed_utc
 FROM agg_resource_tier_change_monthly r
 INNER JOIN dim_resource res ON r.resource_sk = res.resource_sk
@@ -1030,8 +1041,9 @@ SELECT
   r.prior_tier_sku_sk, ps.sku_meter AS prior_sku_meter,
   r.new_tier_sku_sk, ns.sku_meter AS new_sku_meter,
   r.days_on_prior_tier, r.days_on_new_tier,
-  r.prior_unit_rate, r.new_unit_rate,
-  r.realized_savings_unit, r.realized_savings_cost_delta, r.projected_annual_savings,
+  r.prior_unit_rate, r.new_unit_rate, r.post_change_quantity,
+  r.total_qty_on_new_tier, r.counterfactual_cost_on_new_tier,
+  r.realized_savings_unit, r.realized_savings_cost_delta, r.month_realized_savings, r.projected_annual_savings,
   r.change_direction, r.refreshed_utc
 FROM agg_resource_tier_change_intramonth r
 INNER JOIN dim_resource res ON r.resource_sk = res.resource_sk

@@ -21,8 +21,8 @@ func (p *Processor) buildTierAggregates(ctx context.Context, tx *sql.Tx, month s
 func (p *Processor) insertTierChangeMonthlyAggs(ctx context.Context, tx *sql.Tx, month string, refreshed interface{}) error {
 	q := `SELECT month_start, provider, resource_sk, service_sk, application_sk, environment,
 		prior_tier_code, new_tier_code, prior_tier_sku_sk, new_tier_sku_sk,
-		prior_unit_rate, new_unit_rate, post_change_quantity,
-		realized_savings_unit, realized_savings_cost_delta, projected_annual_savings, change_direction
+		prior_unit_rate, new_unit_rate, post_change_quantity, total_qty_on_new_tier, counterfactual_cost_on_new_tier,
+		realized_savings_unit, realized_savings_cost_delta, month_realized_savings, projected_annual_savings, change_direction
 		FROM fact_resource_tier_change WHERE change_scope = 'MOM' AND ` + p.monthEq("month_start", month)
 	rows, err := tx.QueryContext(ctx, q)
 	if err != nil {
@@ -33,30 +33,32 @@ func (p *Processor) insertTierChangeMonthlyAggs(ctx context.Context, tx *sql.Tx,
 	insertSQL := `INSERT INTO agg_resource_tier_change_monthly (
 		month_start, provider, resource_sk, service_sk, application_sk, environment,
 		prior_month_start, prior_tier_code, new_tier_code, prior_tier_sku_sk, new_tier_sku_sk,
-		prior_unit_rate, new_unit_rate, post_change_quantity,
-		realized_savings_unit, realized_savings_cost_delta, projected_annual_savings, change_direction, refreshed_utc
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+		prior_unit_rate, new_unit_rate, post_change_quantity, total_qty_on_new_tier, counterfactual_cost_on_new_tier,
+		realized_savings_unit, realized_savings_cost_delta, month_realized_savings, projected_annual_savings, change_direction, refreshed_utc
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
 	if p.Dialect == "sqlserver" {
 		insertSQL = `INSERT INTO agg_resource_tier_change_monthly (
 		month_start, provider, resource_sk, service_sk, application_sk, environment,
 		prior_month_start, prior_tier_code, new_tier_code, prior_tier_sku_sk, new_tier_sku_sk,
-		prior_unit_rate, new_unit_rate, post_change_quantity,
-		realized_savings_unit, realized_savings_cost_delta, projected_annual_savings, change_direction, refreshed_utc
-	) VALUES (@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15,@p16,@p17,@p18,@p19)`
+		prior_unit_rate, new_unit_rate, post_change_quantity, total_qty_on_new_tier, counterfactual_cost_on_new_tier,
+		realized_savings_unit, realized_savings_cost_delta, month_realized_savings, projected_annual_savings, change_direction, refreshed_utc
+	) VALUES (@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15,@p16,@p17,@p18,@p19,@p20,@p21,@p22)`
 	}
 	priorMonth := priorBillingMonth(month)
 	for rows.Next() {
 		var monthStart, provider, priorTier, newTier, environment, direction string
 		var resourceSK, serviceSK, appSK, priorSku, newSku int64
-		var priorRate, newRate, postQty, unitSav, costDelta, projected string
+		var priorRate, newRate, postQty, totalQty, counterfactual, unitSav, costDelta, monthSav, projected string
 		if err := rows.Scan(&monthStart, &provider, &resourceSK, &serviceSK, &appSK, &environment,
-			&priorTier, &newTier, &priorSku, &newSku, &priorRate, &newRate, &postQty, &unitSav, &costDelta, &projected, &direction); err != nil {
+			&priorTier, &newTier, &priorSku, &newSku, &priorRate, &newRate, &postQty, &totalQty, &counterfactual,
+			&unitSav, &costDelta, &monthSav, &projected, &direction); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, p.q(insertSQL),
 			monthStart, provider, resourceSK, serviceSK, appSK, environment,
 			priorMonth, priorTier, newTier, priorSku, newSku,
-			priorRate, newRate, postQty, unitSav, costDelta, projected, direction, refreshed,
+			priorRate, newRate, postQty, totalQty, counterfactual,
+			unitSav, costDelta, monthSav, projected, direction, refreshed,
 		)
 		if err != nil {
 			return fmt.Errorf("agg_resource_tier_change_monthly: %w", err)
@@ -68,8 +70,9 @@ func (p *Processor) insertTierChangeMonthlyAggs(ctx context.Context, tx *sql.Tx,
 func (p *Processor) insertTierChangeIntramonthAggs(ctx context.Context, tx *sql.Tx, month string, refreshed interface{}) error {
 	q := `SELECT month_start, provider, resource_sk, service_sk, application_sk, environment, change_date,
 		prior_tier_code, new_tier_code, prior_tier_sku_sk, new_tier_sku_sk,
-		days_on_prior_tier, days_on_new_tier, prior_unit_rate, new_unit_rate,
-		realized_savings_unit, realized_savings_cost_delta, projected_annual_savings, change_direction
+		days_on_prior_tier, days_on_new_tier, prior_unit_rate, new_unit_rate, post_change_quantity,
+		total_qty_on_new_tier, counterfactual_cost_on_new_tier,
+		realized_savings_unit, realized_savings_cost_delta, month_realized_savings, projected_annual_savings, change_direction
 		FROM fact_resource_tier_change WHERE change_scope = 'INTRAMONTH' AND ` + p.monthEq("month_start", month)
 	rows, err := tx.QueryContext(ctx, q)
 	if err != nil {
@@ -80,30 +83,33 @@ func (p *Processor) insertTierChangeIntramonthAggs(ctx context.Context, tx *sql.
 	insertSQL := `INSERT INTO agg_resource_tier_change_intramonth (
 		month_start, provider, resource_sk, service_sk, application_sk, environment, change_date,
 		prior_tier_code, new_tier_code, prior_tier_sku_sk, new_tier_sku_sk,
-		days_on_prior_tier, days_on_new_tier, prior_unit_rate, new_unit_rate,
-		realized_savings_unit, realized_savings_cost_delta, projected_annual_savings, change_direction, refreshed_utc
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+		days_on_prior_tier, days_on_new_tier, prior_unit_rate, new_unit_rate, post_change_quantity,
+		total_qty_on_new_tier, counterfactual_cost_on_new_tier,
+		realized_savings_unit, realized_savings_cost_delta, month_realized_savings, projected_annual_savings, change_direction, refreshed_utc
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
 	if p.Dialect == "sqlserver" {
 		insertSQL = `INSERT INTO agg_resource_tier_change_intramonth (
 		month_start, provider, resource_sk, service_sk, application_sk, environment, change_date,
 		prior_tier_code, new_tier_code, prior_tier_sku_sk, new_tier_sku_sk,
-		days_on_prior_tier, days_on_new_tier, prior_unit_rate, new_unit_rate,
-		realized_savings_unit, realized_savings_cost_delta, projected_annual_savings, change_direction, refreshed_utc
-	) VALUES (@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15,@p16,@p17,@p18,@p19,@p20)`
+		days_on_prior_tier, days_on_new_tier, prior_unit_rate, new_unit_rate, post_change_quantity,
+		total_qty_on_new_tier, counterfactual_cost_on_new_tier,
+		realized_savings_unit, realized_savings_cost_delta, month_realized_savings, projected_annual_savings, change_direction, refreshed_utc
+	) VALUES (@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15,@p16,@p17,@p18,@p19,@p20,@p21,@p22,@p23,@p24)`
 	}
 	for rows.Next() {
 		var monthStart, provider, priorTier, newTier, environment, changeDate, direction string
 		var resourceSK, serviceSK, appSK, priorSku, newSku int64
 		var daysPrior, daysNew int
-		var priorRate, newRate, unitSav, costDelta, projected string
+		var priorRate, newRate, postQty, totalQty, counterfactual, unitSav, costDelta, monthSav, projected string
 		if err := rows.Scan(&monthStart, &provider, &resourceSK, &serviceSK, &appSK, &environment, &changeDate,
-			&priorTier, &newTier, &priorSku, &newSku, &daysPrior, &daysNew, &priorRate, &newRate, &unitSav, &costDelta, &projected, &direction); err != nil {
+			&priorTier, &newTier, &priorSku, &newSku, &daysPrior, &daysNew, &priorRate, &newRate, &postQty, &totalQty, &counterfactual,
+			&unitSav, &costDelta, &monthSav, &projected, &direction); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, p.q(insertSQL),
 			monthStart, provider, resourceSK, serviceSK, appSK, environment, changeDate,
-			priorTier, newTier, priorSku, newSku, daysPrior, daysNew, priorRate, newRate,
-			unitSav, costDelta, projected, direction, refreshed,
+			priorTier, newTier, priorSku, newSku, daysPrior, daysNew, priorRate, newRate, postQty, totalQty, counterfactual,
+			unitSav, costDelta, monthSav, projected, direction, refreshed,
 		)
 		if err != nil {
 			return fmt.Errorf("agg_resource_tier_change_intramonth: %w", err)
@@ -136,7 +142,7 @@ func (p *Processor) insertTierChangeSummary(ctx context.Context, tx *sql.Tx, mon
 		}
 		_, err = tx.ExecContext(ctx, p.q(insertSQL),
 			month, parts[0], serviceSK,
-			formatCost(r.unitSavings), formatCost(r.costDelta),
+			formatCost(r.monthSavings), formatCost(r.monthSavings),
 			r.momCount, r.intraCount, r.downsizeCnt, r.upsizeCnt, refreshed,
 		)
 		if err != nil {
@@ -180,7 +186,7 @@ func (p *Processor) updateSavingsSummaryFromTierRollups(ctx context.Context, tx 
 		}
 		changeCount := r.momCount + r.intraCount
 		res, err := tx.ExecContext(ctx, p.q(updateSQL),
-			formatCost(r.unitSavings), formatCost(r.costDelta), changeCount,
+			formatCost(r.monthSavings), formatCost(r.monthSavings), changeCount,
 			month, parts[0], serviceSK,
 		)
 		if err != nil {
@@ -195,7 +201,7 @@ func (p *Processor) updateSavingsSummaryFromTierRollups(ctx context.Context, tx 
 			) VALUES (@p1, @p2, @p3, 0, 0, 0, @p4, @p5, @p6, SYSUTCDATETIME())`
 				if _, err := tx.ExecContext(ctx, insertSQL,
 					month, parts[0], serviceSK,
-					formatCost(r.unitSavings), formatCost(r.costDelta), changeCount,
+					formatCost(r.monthSavings), formatCost(r.monthSavings), changeCount,
 				); err != nil {
 					return err
 				}
@@ -208,7 +214,7 @@ func (p *Processor) updateSavingsSummaryFromTierRollups(ctx context.Context, tx 
 			) VALUES (?, ?, ?, 0, 0, 0, ?, ?, ?, ?)`
 			if _, err := tx.ExecContext(ctx, p.q(insertSQL),
 				month, parts[0], serviceSK,
-				formatCost(r.unitSavings), formatCost(r.costDelta), changeCount, p.refreshedUTCParam(),
+				formatCost(r.monthSavings), formatCost(r.monthSavings), changeCount, p.refreshedUTCParam(),
 			); err != nil {
 				return err
 			}

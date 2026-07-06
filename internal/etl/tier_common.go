@@ -46,8 +46,7 @@ type tierDailyRow struct {
 }
 
 type serviceTierRollup struct {
-	unitSavings  float64
-	costDelta    float64
+	monthSavings float64
 	momCount     int
 	intraCount   int
 	downsizeCnt  int
@@ -100,14 +99,13 @@ func rollupKey(provider string, serviceSK int64) string {
 	return provider + "|" + strconv.FormatInt(serviceSK, 10)
 }
 
-func addTierRollup(rollups map[string]*serviceTierRollup, provider string, serviceSK int64, unitSavings, costDelta float64, dir string, mom, intra bool) {
+func addTierRollup(rollups map[string]*serviceTierRollup, provider string, serviceSK int64, monthSavings float64, dir string, mom, intra bool) {
 	key := rollupKey(provider, serviceSK)
 	if rollups[key] == nil {
 		rollups[key] = &serviceTierRollup{}
 	}
 	r := rollups[key]
-	r.unitSavings += unitSavings
-	r.costDelta += costDelta
+	r.monthSavings += monthSavings
 	if mom {
 		r.momCount++
 	}

@@ -1180,10 +1180,13 @@ BEGIN
     prior_unit_rate              DECIMAL(28,10) NOT NULL DEFAULT 0,
     new_unit_rate                DECIMAL(28,10) NOT NULL DEFAULT 0,
     post_change_quantity         DECIMAL(28,10) NOT NULL DEFAULT 0,
+    total_qty_on_new_tier        DECIMAL(28,10) NOT NULL DEFAULT 0,
+    counterfactual_cost_on_new_tier DECIMAL(28,10) NOT NULL DEFAULT 0,
     days_on_prior_tier           INT NOT NULL DEFAULT 0,
     days_on_new_tier             INT NOT NULL DEFAULT 0,
     realized_savings_unit        DECIMAL(28,10) NOT NULL DEFAULT 0,
     realized_savings_cost_delta  DECIMAL(28,10) NOT NULL DEFAULT 0,
+    month_realized_savings       DECIMAL(28,10) NOT NULL DEFAULT 0,
     projected_annual_savings     DECIMAL(28,10) NOT NULL DEFAULT 0,
     change_direction             VARCHAR(16) NOT NULL,
     refreshed_utc                DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
@@ -1209,8 +1212,11 @@ BEGIN
     prior_unit_rate                     DECIMAL(28,10) NOT NULL DEFAULT 0,
     new_unit_rate                       DECIMAL(28,10) NOT NULL DEFAULT 0,
     post_change_quantity                DECIMAL(28,10) NOT NULL DEFAULT 0,
+    total_qty_on_new_tier               DECIMAL(28,10) NOT NULL DEFAULT 0,
+    counterfactual_cost_on_new_tier       DECIMAL(28,10) NOT NULL DEFAULT 0,
     realized_savings_unit               DECIMAL(28,10) NOT NULL DEFAULT 0,
     realized_savings_cost_delta         DECIMAL(28,10) NOT NULL DEFAULT 0,
+    month_realized_savings              DECIMAL(28,10) NOT NULL DEFAULT 0,
     projected_annual_savings            DECIMAL(28,10) NOT NULL DEFAULT 0,
     change_direction                    VARCHAR(16) NOT NULL,
     refreshed_utc                       DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
@@ -1238,8 +1244,12 @@ BEGIN
     days_on_new_tier                       INT NOT NULL DEFAULT 0,
     prior_unit_rate                        DECIMAL(28,10) NOT NULL DEFAULT 0,
     new_unit_rate                          DECIMAL(28,10) NOT NULL DEFAULT 0,
+    post_change_quantity                   DECIMAL(28,10) NOT NULL DEFAULT 0,
+    total_qty_on_new_tier                  DECIMAL(28,10) NOT NULL DEFAULT 0,
+    counterfactual_cost_on_new_tier        DECIMAL(28,10) NOT NULL DEFAULT 0,
     realized_savings_unit                  DECIMAL(28,10) NOT NULL DEFAULT 0,
     realized_savings_cost_delta            DECIMAL(28,10) NOT NULL DEFAULT 0,
+    month_realized_savings                 DECIMAL(28,10) NOT NULL DEFAULT 0,
     projected_annual_savings               DECIMAL(28,10) NOT NULL DEFAULT 0,
     change_direction                       VARCHAR(16) NOT NULL,
     refreshed_utc                          DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
@@ -1265,6 +1275,37 @@ BEGIN
     UNIQUE (month_start, provider, service_sk)
   );
 END
+GO
+
+IF COL_LENGTH('dbo.fact_resource_tier_change', 'total_qty_on_new_tier') IS NULL
+  ALTER TABLE dbo.fact_resource_tier_change ADD total_qty_on_new_tier DECIMAL(28,10) NOT NULL DEFAULT 0;
+GO
+IF COL_LENGTH('dbo.fact_resource_tier_change', 'counterfactual_cost_on_new_tier') IS NULL
+  ALTER TABLE dbo.fact_resource_tier_change ADD counterfactual_cost_on_new_tier DECIMAL(28,10) NOT NULL DEFAULT 0;
+GO
+IF COL_LENGTH('dbo.fact_resource_tier_change', 'month_realized_savings') IS NULL
+  ALTER TABLE dbo.fact_resource_tier_change ADD month_realized_savings DECIMAL(28,10) NOT NULL DEFAULT 0;
+GO
+IF COL_LENGTH('dbo.agg_resource_tier_change_monthly', 'total_qty_on_new_tier') IS NULL
+  ALTER TABLE dbo.agg_resource_tier_change_monthly ADD total_qty_on_new_tier DECIMAL(28,10) NOT NULL DEFAULT 0;
+GO
+IF COL_LENGTH('dbo.agg_resource_tier_change_monthly', 'counterfactual_cost_on_new_tier') IS NULL
+  ALTER TABLE dbo.agg_resource_tier_change_monthly ADD counterfactual_cost_on_new_tier DECIMAL(28,10) NOT NULL DEFAULT 0;
+GO
+IF COL_LENGTH('dbo.agg_resource_tier_change_monthly', 'month_realized_savings') IS NULL
+  ALTER TABLE dbo.agg_resource_tier_change_monthly ADD month_realized_savings DECIMAL(28,10) NOT NULL DEFAULT 0;
+GO
+IF COL_LENGTH('dbo.agg_resource_tier_change_intramonth', 'post_change_quantity') IS NULL
+  ALTER TABLE dbo.agg_resource_tier_change_intramonth ADD post_change_quantity DECIMAL(28,10) NOT NULL DEFAULT 0;
+GO
+IF COL_LENGTH('dbo.agg_resource_tier_change_intramonth', 'total_qty_on_new_tier') IS NULL
+  ALTER TABLE dbo.agg_resource_tier_change_intramonth ADD total_qty_on_new_tier DECIMAL(28,10) NOT NULL DEFAULT 0;
+GO
+IF COL_LENGTH('dbo.agg_resource_tier_change_intramonth', 'counterfactual_cost_on_new_tier') IS NULL
+  ALTER TABLE dbo.agg_resource_tier_change_intramonth ADD counterfactual_cost_on_new_tier DECIMAL(28,10) NOT NULL DEFAULT 0;
+GO
+IF COL_LENGTH('dbo.agg_resource_tier_change_intramonth', 'month_realized_savings') IS NULL
+  ALTER TABLE dbo.agg_resource_tier_change_intramonth ADD month_realized_savings DECIMAL(28,10) NOT NULL DEFAULT 0;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_fact_resource_tier_daily_month' AND object_id = OBJECT_ID(N'dbo.fact_resource_tier_daily'))
@@ -1939,8 +1980,11 @@ SELECT
     r.prior_unit_rate,
     r.new_unit_rate,
     r.post_change_quantity,
+    r.total_qty_on_new_tier,
+    r.counterfactual_cost_on_new_tier,
     r.realized_savings_unit,
     r.realized_savings_cost_delta,
+    r.month_realized_savings,
     r.projected_annual_savings,
     r.change_direction,
     r.refreshed_utc
@@ -1974,8 +2018,12 @@ SELECT
     r.days_on_new_tier,
     r.prior_unit_rate,
     r.new_unit_rate,
+    r.post_change_quantity,
+    r.total_qty_on_new_tier,
+    r.counterfactual_cost_on_new_tier,
     r.realized_savings_unit,
     r.realized_savings_cost_delta,
+    r.month_realized_savings,
     r.projected_annual_savings,
     r.change_direction,
     r.refreshed_utc

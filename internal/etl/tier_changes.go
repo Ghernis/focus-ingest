@@ -25,6 +25,9 @@ type tierChangeEvent struct {
 	priorUnitRate  float64
 	newUnitRate    float64
 	postChangeQty  float64
+	totalQtyNewTier float64
+	counterfactualCost float64
+	monthRealizedSavings float64
 	daysPrior      int
 	daysNew        int
 	priorMonthCost float64
@@ -42,28 +45,21 @@ func (p *Processor) buildFactResourceTierChanges(ctx context.Context, tx *sql.Tx
 	events = append(events, detectMoMTierChanges(month, priorMonth, daily, priorDaily)...)
 
 	for _, ev := range events {
-		unitSavings := (ev.priorUnitRate - ev.newUnitRate) * ev.postChangeQty
-		costDelta := ev.priorMonthCost - ev.currentCost
-		if ev.scope == changeScopeIntra {
-			costDelta = (ev.priorUnitRate * ev.postChangeQty) - ev.currentCost
-		}
-		var projectedAnnual float64
-		if ev.scope == changeScopeMoM {
-			projectedAnnual = unitSavings * 12
-		} else if ev.daysNew > 0 {
-			projectedAnnual = unitSavings / float64(ev.daysNew) * 365
-		}
+		projectedAnnual := projectedAnnualFromMonthSavings(ev.monthRealizedSavings, ev.scope, ev.daysNew)
 		dir := tierChangeDirection(ev.priorTierRank, ev.newTierRank, ev.priorUnitRate, ev.newUnitRate)
-		if dir == changeNeutral && ev.priorTierCode != ev.newTierCode {
-			dir = tierChangeDirection(ev.priorTierRank, ev.newTierRank, ev.priorUnitRate, ev.newUnitRate)
+		savings := tierSavingsResult{
+			totalQtyOnNewTier:           ev.totalQtyNewTier,
+			counterfactualCostOnNewTier: ev.counterfactualCost,
+			monthRealizedSavings:        ev.monthRealizedSavings,
+			rateDiffTimesQty:            ev.monthRealizedSavings,
 		}
 
-		if err := p.insertTierChangeFact(ctx, tx, ev, unitSavings, costDelta, projectedAnnual, dir, refreshed); err != nil {
+		if err := p.insertTierChangeFact(ctx, tx, ev, savings, projectedAnnual, dir, refreshed); err != nil {
 			return err
 		}
 		mom := ev.scope == changeScopeMoM
 		intra := ev.scope == changeScopeIntra
-		addTierRollup(rollups, ev.provider, ev.serviceSK, unitSavings, costDelta, dir, mom, intra)
+		addTierRollup(rollups, ev.provider, ev.serviceSK, ev.monthRealizedSavings, dir, mom, intra)
 	}
 	return nil
 }
@@ -125,15 +121,11 @@ func detectIntraMonthTierChanges(daily []tierDailyRow) []tierChangeEvent {
 			}
 			changeDate := cur.chargeDate
 			daysPrior, daysNew := 0, 0
-			var priorCost, newCost, totalQty float64
+			var newCost float64
 			for _, d := range dates {
 				row := byDate[d]
-				totalQty += row.tierQty
 				if d < changeDate {
 					daysPrior++
-					if row.tierCode == prev.tierCode {
-						priorCost += row.tierCost
-					}
 				} else {
 					daysNew++
 					if row.tierCode == cur.tierCode {
@@ -141,31 +133,35 @@ func detectIntraMonthTierChanges(daily []tierDailyRow) []tierChangeEvent {
 					}
 				}
 			}
-			postQty := cur.tierQty
+			savings := computeIntramonthNewTierSavings(prev.tierUnitRate, dates, byDate, changeDate, cur.tierCode)
+			postQty := savings.totalQtyOnNewTier
 			if postQty <= 0 {
-				postQty = totalQty
+				postQty = cur.tierQty
 			}
 			events = append(events, tierChangeEvent{
-				scope:         changeScopeIntra,
-				month:         cur.billingMonth,
-				changeDate:    changeDate,
-				provider:      cur.provider,
-				resourceSK:    k.resourceSK,
-				serviceSK:     k.serviceSK,
-				applicationSK: cur.applicationSK,
-				environment:   cur.environment,
-				priorTierCode: prev.tierCode,
-				newTierCode:   cur.tierCode,
-				priorTierRank: prev.tierRank,
-				newTierRank:   cur.tierRank,
-				priorSkuSK:    prev.tierSkuSK,
-				newSkuSK:      cur.tierSkuSK,
-				priorUnitRate: prev.tierUnitRate,
-				newUnitRate:   cur.tierUnitRate,
-				postChangeQty: postQty,
-				daysPrior:     daysPrior,
-				daysNew:       daysNew,
-				currentCost:   newCost,
+				scope:                changeScopeIntra,
+				month:                cur.billingMonth,
+				changeDate:           changeDate,
+				provider:             cur.provider,
+				resourceSK:           k.resourceSK,
+				serviceSK:            k.serviceSK,
+				applicationSK:        cur.applicationSK,
+				environment:          cur.environment,
+				priorTierCode:        prev.tierCode,
+				newTierCode:          cur.tierCode,
+				priorTierRank:        prev.tierRank,
+				newTierRank:          cur.tierRank,
+				priorSkuSK:           prev.tierSkuSK,
+				newSkuSK:             cur.tierSkuSK,
+				priorUnitRate:        prev.tierUnitRate,
+				newUnitRate:          cur.tierUnitRate,
+				postChangeQty:        postQty,
+				totalQtyNewTier:      savings.totalQtyOnNewTier,
+				counterfactualCost:     savings.counterfactualCostOnNewTier,
+				monthRealizedSavings: savings.monthRealizedSavings,
+				daysPrior:            daysPrior,
+				daysNew:              daysNew,
+				currentCost:          newCost,
 			})
 			break
 		}
@@ -183,26 +179,30 @@ func detectMoMTierChanges(month, priorMonth string, current, prior []tierDailyRo
 			continue
 		}
 		postQty := cur.tierQty
+		savings := computeMoMTierSavings(prev.tierUnitRate, cur.tierUnitRate, postQty, cur.tierCost)
 		events = append(events, tierChangeEvent{
-			scope:          changeScopeMoM,
-			month:          month,
-			changeDate:     month,
-			provider:       cur.provider,
-			resourceSK:     k.resourceSK,
-			serviceSK:      k.serviceSK,
-			applicationSK:  cur.applicationSK,
-			environment:    cur.environment,
-			priorTierCode:  prev.tierCode,
-			newTierCode:    cur.tierCode,
-			priorTierRank:  prev.tierRank,
-			newTierRank:    cur.tierRank,
-			priorSkuSK:     prev.tierSkuSK,
-			newSkuSK:       cur.tierSkuSK,
-			priorUnitRate:  prev.tierUnitRate,
-			newUnitRate:    cur.tierUnitRate,
-			postChangeQty:  postQty,
-			priorMonthCost: prev.tierCost,
-			currentCost:    cur.tierCost,
+			scope:                changeScopeMoM,
+			month:                month,
+			changeDate:           month,
+			provider:             cur.provider,
+			resourceSK:           k.resourceSK,
+			serviceSK:            k.serviceSK,
+			applicationSK:        cur.applicationSK,
+			environment:          cur.environment,
+			priorTierCode:        prev.tierCode,
+			newTierCode:          cur.tierCode,
+			priorTierRank:        prev.tierRank,
+			newTierRank:          cur.tierRank,
+			priorSkuSK:           prev.tierSkuSK,
+			newSkuSK:             cur.tierSkuSK,
+			priorUnitRate:        prev.tierUnitRate,
+			newUnitRate:          cur.tierUnitRate,
+			postChangeQty:        postQty,
+			totalQtyNewTier:      savings.totalQtyOnNewTier,
+			counterfactualCost:     savings.counterfactualCostOnNewTier,
+			monthRealizedSavings: savings.monthRealizedSavings,
+			priorMonthCost:       prev.tierCost,
+			currentCost:          cur.tierCost,
 		})
 	}
 	return events
@@ -249,29 +249,33 @@ func dominantTierByMonth(daily []tierDailyRow, month string) map[resourceService
 	return out
 }
 
-func (p *Processor) insertTierChangeFact(ctx context.Context, tx *sql.Tx, ev tierChangeEvent, unitSavings, costDelta, projectedAnnual float64, dir string, refreshed interface{}) error {
+func (p *Processor) insertTierChangeFact(ctx context.Context, tx *sql.Tx, ev tierChangeEvent, savings tierSavingsResult, projectedAnnual float64, dir string, refreshed interface{}) error {
 	insertSQL := `INSERT INTO fact_resource_tier_change (
 		change_scope, month_start, change_date, provider, resource_sk, service_sk, application_sk, environment,
 		prior_tier_code, new_tier_code, prior_tier_rank, new_tier_rank,
 		prior_tier_sku_sk, new_tier_sku_sk, prior_unit_rate, new_unit_rate, post_change_quantity,
+		total_qty_on_new_tier, counterfactual_cost_on_new_tier,
 		days_on_prior_tier, days_on_new_tier,
-		realized_savings_unit, realized_savings_cost_delta, projected_annual_savings, change_direction, refreshed_utc
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+		realized_savings_unit, realized_savings_cost_delta, month_realized_savings, projected_annual_savings, change_direction, refreshed_utc
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
 	if p.Dialect == "sqlserver" {
 		insertSQL = `INSERT INTO fact_resource_tier_change (
 		change_scope, month_start, change_date, provider, resource_sk, service_sk, application_sk, environment,
 		prior_tier_code, new_tier_code, prior_tier_rank, new_tier_rank,
 		prior_tier_sku_sk, new_tier_sku_sk, prior_unit_rate, new_unit_rate, post_change_quantity,
+		total_qty_on_new_tier, counterfactual_cost_on_new_tier,
 		days_on_prior_tier, days_on_new_tier,
-		realized_savings_unit, realized_savings_cost_delta, projected_annual_savings, change_direction, refreshed_utc
-	) VALUES (@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15,@p16,@p17,@p18,@p19,@p20,@p21,@p22,@p23,@p24)`
+		realized_savings_unit, realized_savings_cost_delta, month_realized_savings, projected_annual_savings, change_direction, refreshed_utc
+	) VALUES (@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15,@p16,@p17,@p18,@p19,@p20,@p21,@p22,@p23,@p24,@p25,@p26,@p27)`
 	}
+	monthSavings := savings.monthRealizedSavings
 	_, err := tx.ExecContext(ctx, p.q(insertSQL),
 		ev.scope, ev.month, ev.changeDate, ev.provider, ev.resourceSK, ev.serviceSK, ev.applicationSK, ev.environment,
 		ev.priorTierCode, ev.newTierCode, ev.priorTierRank, ev.newTierRank,
 		ev.priorSkuSK, ev.newSkuSK, formatCost(ev.priorUnitRate), formatCost(ev.newUnitRate), formatCost(ev.postChangeQty),
+		formatCost(savings.totalQtyOnNewTier), formatCost(savings.counterfactualCostOnNewTier),
 		ev.daysPrior, ev.daysNew,
-		formatCost(unitSavings), formatCost(costDelta), formatCost(projectedAnnual), dir, refreshed,
+		formatCost(savings.rateDiffTimesQty), formatCost(monthSavings), formatCost(monthSavings), formatCost(projectedAnnual), dir, refreshed,
 	)
 	if err != nil {
 		return fmt.Errorf("fact_resource_tier_change: %w", err)
