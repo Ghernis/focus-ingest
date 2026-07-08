@@ -147,3 +147,55 @@ func TestTierChangeDirection_RankBased(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 }
+
+func TestResolveTierForFact_StoredTierWithoutMeterFlag(t *testing.T) {
+	engine, err := loadTierRulesEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, rank, ok := resolveTierForFact(
+		engine,
+		"AZURE",
+		"Virtual Machines",
+		"unknown",
+		"unknown",
+		"D4s v5",
+		680404,
+		false,
+	)
+	if !ok {
+		t.Fatal("expected stored tier metadata to be accepted")
+	}
+	if code != "D4s v5" {
+		t.Fatalf("tier_code=%q", code)
+	}
+	if rank != 680404 {
+		t.Fatalf("tier_rank=%d", rank)
+	}
+}
+
+func TestResolveTierForFact_StoredTierInfersRank(t *testing.T) {
+	engine, err := loadTierRulesEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, rank, ok := resolveTierForFact(
+		engine,
+		"AZURE",
+		"Virtual Machines",
+		"unknown",
+		"unknown",
+		"D2s v5",
+		0,
+		false,
+	)
+	if !ok {
+		t.Fatal("expected inferred rank from stored tier code")
+	}
+	if code != "D2s v5" {
+		t.Fatalf("tier_code=%q", code)
+	}
+	if rank <= 0 {
+		t.Fatalf("tier_rank=%d", rank)
+	}
+}

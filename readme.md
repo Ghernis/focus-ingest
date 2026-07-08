@@ -215,3 +215,43 @@ If you want, we can add a small PowerShell helper script that classifies partiti
 # all billings final with facts
 
 `.\focus-ingest.exe publish --connection $conn --sqlite-path focus_2026-06.db --billing-period 2026-06-01 --facts`
+
+# remediate
+
+Main findings (ordered by impact)
+
+Your compared dataset only contains realized intramonth changes, not the full recommendation universe.
+This is the biggest driver of “missing VMs.”
+Intramonth aggregate is sourced only from change_scope = INTRAMONTH in tier_aggregates.go:76.
+The ETL only writes rows when it detects a tier transition event in tier_changes.go:95.
+If a VM has no actual detected tier change, it will not appear in agg_resource_tier_change_intramonth even if third-party suggests savings.
+Many records are filtered out before tier-change detection due to strict prerequisites and tier resolution rules.
+Source rows are excluded when sub_account_sk/resource_sk/sku_sk are null in tier_daily.go:53.
+If tier cannot be resolved, the row is skipped in tier_daily.go:90.
+Tier resolution returns false in tier_daily.go:137.
+Rule coverage is narrow (only a few service_name families) in tier_rules.json:5, tier_rules.json:13, tier_rules.json:21, tier_rules.json:29, tier_rules.json:45.
+There is real undercount risk inside intramonth event detection logic.
+Same-day rows are collapsed by overwrite behavior in tier_changes.go:113.
+After the first detected change in a month, loop exits with break in tier_changes.go:166.
+This can drop additional valid transitions for the same VM-month.
+Stable-tier VMs are intentionally excluded from intramonth output.
+Requires at least 2 rows in month in tier_changes.go:104.
+Requires tierCode change across dates in tier_changes.go:119.
+So VMs with recommendations but no observed tier switch will be “missing” by design.
+Data evidence from your current reconciliation
+
+only_third non-zero VM-month keys: 2343 (from your reconciliation run).
+I ran an action split for only_third non-zero keys:
+Sobredimensionada: 1569
+Uso intensivo de MEM: 302
+Blank action: 294
+No ajustar: 178
+This strongly supports that third-party includes recommendation-style rows beyond realized intramonth changes.
+
+Bottom line
+You are not only seeing a bug; you are also seeing a scope/method mismatch.
+
+Scope mismatch: recommendation report vs realized intramonth change fact.
+ETL exclusions: strict key/tier filters and limited tier-rule coverage.
+True ETL undercount candidates: first-change-only break and same-day overwrite behavior.
+If you want, next I can implement a focused diagnostic layer in ETL output to prove exactly where each missing VM drops out (null key filter vs tier-rule miss vs no change detected), VM by VM.

@@ -36,7 +36,9 @@ func (p *Processor) buildFactResourceTierDaily(ctx context.Context, tx *sql.Tx, 
 	appSK := p.applicationSKExpr()
 	env := p.environmentExpr()
 	joins := p.appContextJoins()
-	subJoin := p.subAccountJoin()
+	subJoin := `
+LEFT JOIN dim_sub_account sa ON f.sub_account_sk = sa.sub_account_sk
+INNER JOIN dim_account a ON COALESCE(sa.billing_account_sk, f.billing_account_sk) = a.account_sk`
 	monthFilter := p.monthEq("f.billing_period_start", month)
 	serviceNameExpr := `COALESCE(NULLIF(TRIM(svc.service_name), ''), NULLIF(TRIM(s.service_name), ''), '')`
 
@@ -50,8 +52,7 @@ func (p *Processor) buildFactResourceTierDaily(ctx context.Context, tx *sql.Tx, 
 		%s
 		INNER JOIN dim_sku s ON f.sku_sk = s.sku_sk
 		INNER JOIN dim_service svc ON f.service_sk = svc.service_sk
-		WHERE f.sub_account_sk IS NOT NULL
-		  AND f.resource_sk IS NOT NULL
+		WHERE f.resource_sk IS NOT NULL
 		  AND f.sku_sk IS NOT NULL
 		  AND %s
 		GROUP BY f.charge_date, f.billing_period_start, a.provider, f.resource_sk, f.service_sk, %s, %s,
@@ -129,8 +130,15 @@ func (p *Processor) buildFactResourceTierDaily(ctx context.Context, tx *sql.Tx, 
 
 func resolveTierForFact(engine *tierRulesEngine, provider, serviceName, skuPriceID, skuMeter, storedTierCode string, storedTierRank int, storedTierMeter bool) (string, int, bool) {
 	storedTierCode = strings.TrimSpace(storedTierCode)
-	if storedTierMeter && storedTierCode != "" {
-		return storedTierCode, storedTierRank, true
+	if storedTierCode != "" {
+		rank := storedTierRank
+		if rank <= 0 {
+			rank = vmNumericTierRank(storedTierCode)
+		}
+		// Keep stored tier metadata when meter flag is true, or when we can derive a reliable rank.
+		if storedTierMeter || rank > 0 {
+			return storedTierCode, rank, true
+		}
 	}
 	match, ok := engine.matchSKU(provider, serviceName, skuPriceID, skuMeter)
 	if !ok {

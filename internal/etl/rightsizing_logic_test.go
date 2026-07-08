@@ -38,3 +38,30 @@ func TestDetectIntraMonthTierChanges(t *testing.T) {
 		t.Fatalf("unexpected event: %+v", events[0])
 	}
 }
+
+func TestDetectIntraMonthTierChanges_MultipleTransitions(t *testing.T) {
+	daily := []tierDailyRow{
+		{chargeDate: "2024-03-10", billingMonth: "2024-03-01", provider: "AZURE", resourceSK: 7, serviceSK: 9, tierCode: "D8s v5", tierRank: 680804, tierSkuSK: 1, tierUnitRate: 8, tierCost: 80, tierQty: 10},
+		{chargeDate: "2024-03-15", billingMonth: "2024-03-01", provider: "AZURE", resourceSK: 7, serviceSK: 9, tierCode: "D4s v5", tierRank: 680404, tierSkuSK: 2, tierUnitRate: 4, tierCost: 40, tierQty: 10},
+		{chargeDate: "2024-03-20", billingMonth: "2024-03-01", provider: "AZURE", resourceSK: 7, serviceSK: 9, tierCode: "D2s v5", tierRank: 680204, tierSkuSK: 3, tierUnitRate: 2, tierCost: 20, tierQty: 10},
+	}
+
+	events := detectIntraMonthTierChanges(daily)
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
+	}
+
+	if events[0].changeDate != "2024-03-15" || events[0].priorTierCode != "D8s v5" || events[0].newTierCode != "D4s v5" {
+		t.Fatalf("unexpected first event: %+v", events[0])
+	}
+	if events[1].changeDate != "2024-03-20" || events[1].priorTierCode != "D4s v5" || events[1].newTierCode != "D2s v5" {
+		t.Fatalf("unexpected second event: %+v", events[1])
+	}
+
+	if events[0].monthRealizedSavings != 40 {
+		t.Fatalf("expected first event savings 40, got %v", events[0].monthRealizedSavings)
+	}
+	if events[1].monthRealizedSavings != 20 {
+		t.Fatalf("expected second event savings 20, got %v", events[1].monthRealizedSavings)
+	}
+}

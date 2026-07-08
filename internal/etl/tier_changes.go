@@ -100,70 +100,105 @@ func detectIntraMonthTierChanges(daily []tierDailyRow) []tierChangeEvent {
 	}
 	var events []tierChangeEvent
 	for k, rows := range byKey {
-		sort.Slice(rows, func(i, j int) bool { return rows[i].chargeDate < rows[j].chargeDate })
+		sort.Slice(rows, func(i, j int) bool {
+			if rows[i].chargeDate != rows[j].chargeDate {
+				return rows[i].chargeDate < rows[j].chargeDate
+			}
+			if rows[i].tierCost != rows[j].tierCost {
+				return rows[i].tierCost > rows[j].tierCost
+			}
+			return rows[i].tierSkuSK < rows[j].tierSkuSK
+		})
 		if len(rows) < 2 {
 			continue
 		}
-		dates := make([]string, 0, len(rows))
-		byDate := map[string]tierDailyRow{}
-		for _, r := range rows {
-			if _, ok := byDate[r.chargeDate]; !ok {
-				dates = append(dates, r.chargeDate)
+
+		// Keep one dominant row per date to avoid map-overwrite loss for duplicated same-day rows.
+		dayRows := make([]tierDailyRow, 0, len(rows))
+		for i := 0; i < len(rows); {
+			best := rows[i]
+			j := i + 1
+			for j < len(rows) && rows[j].chargeDate == rows[i].chargeDate {
+				cand := rows[j]
+				if cand.tierCost > best.tierCost || (cand.tierCost == best.tierCost && cand.tierSkuSK < best.tierSkuSK) {
+					best = cand
+				}
+				j++
 			}
-			byDate[r.chargeDate] = r
+			dayRows = append(dayRows, best)
+			i = j
 		}
-		sort.Strings(dates)
-		for i := 1; i < len(dates); i++ {
-			prev := byDate[dates[i-1]]
-			cur := byDate[dates[i]]
-			if prev.tierCode == cur.tierCode {
+		if len(dayRows) < 2 {
+			continue
+		}
+
+		type tierRun struct {
+			start int
+			end   int
+			row   tierDailyRow
+		}
+		runs := make([]tierRun, 0, len(dayRows))
+		current := tierRun{start: 0, end: 0, row: dayRows[0]}
+		for i := 1; i < len(dayRows); i++ {
+			if dayRows[i].tierCode == current.row.tierCode {
+				current.end = i
 				continue
 			}
-			changeDate := cur.chargeDate
-			daysPrior, daysNew := 0, 0
-			var newCost float64
-			for _, d := range dates {
-				row := byDate[d]
-				if d < changeDate {
-					daysPrior++
-				} else {
-					daysNew++
-					if row.tierCode == cur.tierCode {
-						newCost += row.tierCost
-					}
-				}
+			runs = append(runs, current)
+			current = tierRun{start: i, end: i, row: dayRows[i]}
+		}
+		runs = append(runs, current)
+
+		if len(runs) < 2 {
+			continue
+		}
+
+		for i := 1; i < len(runs); i++ {
+			prevRun := runs[i-1]
+			newRun := runs[i]
+			changeDate := dayRows[newRun.start].chargeDate
+			daysPrior := newRun.start
+			daysNew := newRun.end - newRun.start + 1
+
+			var totalQtyNew, counterfactual, monthSavings, newCost float64
+			for d := newRun.start; d <= newRun.end; d++ {
+				row := dayRows[d]
+				totalQtyNew += row.tierQty
+				counterfactual += prevRun.row.tierUnitRate * row.tierQty
+				monthSavings += (prevRun.row.tierUnitRate - row.tierUnitRate) * row.tierQty
+				newCost += row.tierCost
 			}
-			savings := computeIntramonthNewTierSavings(prev.tierUnitRate, dates, byDate, changeDate, cur.tierCode)
-			postQty := savings.totalQtyOnNewTier
+
+			postQty := dayRows[newRun.start].tierQty
 			if postQty <= 0 {
-				postQty = cur.tierQty
+				postQty = totalQtyNew
 			}
+
 			events = append(events, tierChangeEvent{
 				scope:                changeScopeIntra,
-				month:                cur.billingMonth,
+				month:                dayRows[newRun.start].billingMonth,
 				changeDate:           changeDate,
-				provider:             cur.provider,
+				provider:             dayRows[newRun.start].provider,
 				resourceSK:           k.resourceSK,
 				serviceSK:            k.serviceSK,
-				applicationSK:        cur.applicationSK,
-				environment:          cur.environment,
-				priorTierCode:        prev.tierCode,
-				newTierCode:          cur.tierCode,
-				priorTierRank:        prev.tierRank,
-				newTierRank:          cur.tierRank,
-				priorSkuSK:           prev.tierSkuSK,
-				newSkuSK:             cur.tierSkuSK,
-				priorUnitRate:        prev.tierUnitRate,
-				newUnitRate:          cur.tierUnitRate,
+				applicationSK:        dayRows[newRun.start].applicationSK,
+				environment:          dayRows[newRun.start].environment,
+				priorTierCode:        prevRun.row.tierCode,
+				newTierCode:          newRun.row.tierCode,
+				priorTierRank:        prevRun.row.tierRank,
+				newTierRank:          newRun.row.tierRank,
+				priorSkuSK:           prevRun.row.tierSkuSK,
+				newSkuSK:             newRun.row.tierSkuSK,
+				priorUnitRate:        prevRun.row.tierUnitRate,
+				newUnitRate:          newRun.row.tierUnitRate,
 				postChangeQty:        postQty,
-				totalQtyNewTier:      savings.totalQtyOnNewTier,
-				counterfactualCost:     savings.counterfactualCostOnNewTier,
-				monthRealizedSavings: savings.monthRealizedSavings,
+				totalQtyNewTier:      totalQtyNew,
+				counterfactualCost:   counterfactual,
+				monthRealizedSavings: monthSavings,
 				daysPrior:            daysPrior,
 				daysNew:              daysNew,
 				currentCost:          newCost,
 			})
-			break
 		}
 	}
 	return events
