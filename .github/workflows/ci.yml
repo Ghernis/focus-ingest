@@ -20,6 +20,8 @@ jobs:
         env:
           ACCEPT_EULA: Y
           MSSQL_SA_PASSWORD: Your_password123
+          # Match typical Azure SQL / warehouse collation so tempdb and user DB agree.
+          MSSQL_COLLATION: SQL_Latin1_General_CP1_CI_AS
         ports:
           - 1433:1433
         # Readiness is enforced in "Wait for SQL Server port" + ci_create_mssql_db.go

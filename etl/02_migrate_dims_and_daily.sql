@@ -25,39 +25,39 @@ IF OBJECT_ID('tempdb..#stg_norm') IS NOT NULL DROP TABLE #stg_norm;
 
 SELECT
   s.*,
-  CASE
+  CAST(CASE
     WHEN COALESCE(s.Provider, s.source_provider) IN ('AWS', 'Amazon Web Services') THEN 'AWS'
     WHEN COALESCE(s.Provider, s.source_provider) IN ('Microsoft', 'Azure') THEN 'AZURE'
     WHEN COALESCE(s.Provider, s.source_provider) IN ('Google Cloud', 'GCP', 'Google') THEN 'GCP'
     ELSE NULL
-  END AS provider_code,
+  END AS VARCHAR(10)) COLLATE DATABASE_DEFAULT AS provider_code,
   CAST(s.ChargePeriodStart AS DATE) AS charge_date,
   CAST(s.BillingPeriodStart AS DATE) AS billing_period_start_date,
   CAST(s.BillingPeriodEnd AS DATE) AS billing_period_end_date,
-  CASE
+  CAST(CASE
     WHEN LOWER(LTRIM(RTRIM(s.ChargeCategory))) = 'usage' THEN 'Usage'
     WHEN LOWER(LTRIM(RTRIM(s.ChargeCategory))) = 'purchase' THEN 'Purchase'
     WHEN LOWER(LTRIM(RTRIM(s.ChargeCategory))) = 'tax' THEN 'Tax'
     WHEN LOWER(LTRIM(RTRIM(s.ChargeCategory))) = 'credit' THEN 'Credit'
     WHEN LOWER(LTRIM(RTRIM(s.ChargeCategory))) = 'adjustment' THEN 'Adjustment'
     ELSE s.ChargeCategory
-  END AS charge_category_norm,
-  CASE WHEN NULLIF(LTRIM(RTRIM(s.PricingCategory)), '') IS NULL THEN NULL
+  END AS VARCHAR(32)) COLLATE DATABASE_DEFAULT AS charge_category_norm,
+  CAST(CASE WHEN NULLIF(LTRIM(RTRIM(s.PricingCategory)), '') IS NULL THEN NULL
        WHEN LOWER(s.PricingCategory) = 'standard' THEN 'Standard'
        WHEN LOWER(s.PricingCategory) = 'committed' THEN 'Committed'
        WHEN LOWER(s.PricingCategory) = 'dynamic' THEN 'Dynamic'
        ELSE 'Other'
-  END AS pricing_category_norm,
-  CONVERT(CHAR(64), HASHBYTES('SHA2_256', COALESCE(s.ChargeDescription, N'')), 2) AS charge_description_hash,
-  NULLIF(LTRIM(RTRIM(s.SkuId)), '') AS sku_id_norm,
-  NULLIF(LTRIM(RTRIM(s.SkuPriceId)), '') AS sku_price_id_norm,
-  COALESCE(NULLIF(LTRIM(RTRIM(s.ServiceName)), ''), 'UNKNOWN') AS service_code_norm,
-  NULLIF(LTRIM(RTRIM(s.SubAccountId)), '') AS sub_account_id_norm,
-  NULLIF(LTRIM(RTRIM(s.RegionId)), '') AS region_id_norm,
-  NULLIF(LTRIM(RTRIM(s.ResourceId)), '') AS resource_id_norm,
-  NULLIF(LTRIM(RTRIM(s.CommitmentDiscountId)), '') AS commitment_discount_id_norm,
-  NULLIF(LTRIM(RTRIM(s.CapacityReservationId)), '') AS capacity_reservation_id_norm,
-  NULLIF(LTRIM(RTRIM(s.ChargeFrequency)), '') AS charge_frequency_norm
+  END AS VARCHAR(32)) COLLATE DATABASE_DEFAULT AS pricing_category_norm,
+  CONVERT(CHAR(64), HASHBYTES('SHA2_256', COALESCE(s.ChargeDescription, N'')), 2) COLLATE DATABASE_DEFAULT AS charge_description_hash,
+  CAST(NULLIF(LTRIM(RTRIM(s.SkuId)), '') AS VARCHAR(128)) COLLATE DATABASE_DEFAULT AS sku_id_norm,
+  CAST(NULLIF(LTRIM(RTRIM(s.SkuPriceId)), '') AS VARCHAR(256)) COLLATE DATABASE_DEFAULT AS sku_price_id_norm,
+  CAST(COALESCE(NULLIF(LTRIM(RTRIM(s.ServiceName)), ''), 'UNKNOWN') AS VARCHAR(256)) COLLATE DATABASE_DEFAULT AS service_code_norm,
+  CAST(NULLIF(LTRIM(RTRIM(s.SubAccountId)), '') AS VARCHAR(512)) COLLATE DATABASE_DEFAULT AS sub_account_id_norm,
+  CAST(NULLIF(LTRIM(RTRIM(s.RegionId)), '') AS VARCHAR(128)) COLLATE DATABASE_DEFAULT AS region_id_norm,
+  CAST(NULLIF(LTRIM(RTRIM(s.ResourceId)), '') AS VARCHAR(512)) COLLATE DATABASE_DEFAULT AS resource_id_norm,
+  CAST(NULLIF(LTRIM(RTRIM(s.CommitmentDiscountId)), '') AS VARCHAR(512)) COLLATE DATABASE_DEFAULT AS commitment_discount_id_norm,
+  CAST(NULLIF(LTRIM(RTRIM(s.CapacityReservationId)), '') AS VARCHAR(512)) COLLATE DATABASE_DEFAULT AS capacity_reservation_id_norm,
+  CAST(NULLIF(LTRIM(RTRIM(s.ChargeFrequency)), '') AS VARCHAR(32)) COLLATE DATABASE_DEFAULT AS charge_frequency_norm
 INTO #stg_norm
 FROM dbo.stg_focus_cost_line s
 WHERE s.ingestion_batch_id = @IngestionBatchId

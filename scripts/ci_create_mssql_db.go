@@ -55,7 +55,7 @@ func main() {
 			time.Sleep(2 * time.Second)
 			continue
 		}
-		if _, err := db.ExecContext(ctx, `IF DB_ID('focus_e2e') IS NULL CREATE DATABASE focus_e2e;`); err != nil {
+		if _, err := db.ExecContext(ctx, `IF DB_ID('focus_e2e') IS NULL CREATE DATABASE focus_e2e COLLATE SQL_Latin1_General_CP1_CI_AS;`); err != nil {
 			fail(err)
 		}
 		fmt.Println("database focus_e2e ready")
