@@ -47,6 +47,22 @@ WHERE s.ingestion_batch_id = @IngestionBatchId
   AND s.ChargePeriodStart IS NOT NULL
   AND s.BillingAccountId IS NOT NULL;
 
+-- SELECT INTO can leave expression columns on tempdb collation (e.g. Latin1_General_BIN2
+-- on Docker) while dim tables use the user-database collation. Force DATABASE_DEFAULT.
+ALTER TABLE #stg_norm ALTER COLUMN provider_code VARCHAR(10) COLLATE DATABASE_DEFAULT NULL;
+ALTER TABLE #stg_norm ALTER COLUMN charge_category_norm VARCHAR(32) COLLATE DATABASE_DEFAULT NULL;
+ALTER TABLE #stg_norm ALTER COLUMN pricing_category_norm VARCHAR(32) COLLATE DATABASE_DEFAULT NULL;
+ALTER TABLE #stg_norm ALTER COLUMN charge_description_hash CHAR(64) COLLATE DATABASE_DEFAULT NOT NULL;
+ALTER TABLE #stg_norm ALTER COLUMN sku_id_norm VARCHAR(256) COLLATE DATABASE_DEFAULT NULL;
+ALTER TABLE #stg_norm ALTER COLUMN sku_price_id_norm VARCHAR(512) COLLATE DATABASE_DEFAULT NULL;
+ALTER TABLE #stg_norm ALTER COLUMN service_code_norm VARCHAR(256) COLLATE DATABASE_DEFAULT NOT NULL;
+ALTER TABLE #stg_norm ALTER COLUMN sub_account_id_norm VARCHAR(512) COLLATE DATABASE_DEFAULT NULL;
+ALTER TABLE #stg_norm ALTER COLUMN region_id_norm VARCHAR(128) COLLATE DATABASE_DEFAULT NULL;
+ALTER TABLE #stg_norm ALTER COLUMN resource_id_norm VARCHAR(512) COLLATE DATABASE_DEFAULT NULL;
+ALTER TABLE #stg_norm ALTER COLUMN commitment_discount_id_norm VARCHAR(512) COLLATE DATABASE_DEFAULT NULL;
+ALTER TABLE #stg_norm ALTER COLUMN capacity_reservation_id_norm VARCHAR(512) COLLATE DATABASE_DEFAULT NULL;
+ALTER TABLE #stg_norm ALTER COLUMN charge_frequency_norm VARCHAR(32) COLLATE DATABASE_DEFAULT NULL;
+
 DELETE FROM #stg_norm WHERE provider_code IS NULL;
 
 -- ---------------------------------------------------------------------

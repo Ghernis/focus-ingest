@@ -77,4 +77,4 @@ FOCUS_E2E_SQLSERVER_DSN='sqlserver://sa:Your_password123@localhost:1433?database
   go test ./internal/etl/ -run TestE2EParquetHistoryOverlap_SQLServer_OptIn -count=1 -v
 ```
 
-Use `encrypt=disable` (and/or `TrustServerCertificate=true`) against the Docker image. Set `MSSQL_COLLATION=SQL_Latin1_General_CP1_CI_AS` so instance/`tempdb` match the warehouse DB (avoids BIN2 vs CI_AS conflicts on set-based ETL joins). The test calls `ResetSchema` — only point the DSN at a disposable database.
+Use `encrypt=disable` (and/or `TrustServerCertificate=true`) against the Docker image. Prefer `MSSQL_COLLATION=SQL_Latin1_General_CP1_CI_AS` so instance/`tempdb` match Azure-like warehouses. `scripts/ci_create_mssql_db.go` creates `focus_e2e` with the **instance** collation, and set-based ETL forces `#stg_norm` expression columns to `COLLATE DATABASE_DEFAULT` (avoids BIN2 vs CI_AS join failures). The test calls `ResetSchema` — only point the DSN at a disposable database.
