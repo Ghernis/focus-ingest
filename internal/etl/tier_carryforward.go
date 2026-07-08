@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	"github.com/ghernis/focus_dt/internal/focus"
 )
 
 type carryforwardBaseline struct {
@@ -157,19 +159,16 @@ func (p *Processor) loadCarryforwardPrevCumulative(ctx context.Context, tx *sql.
 	out := map[carryforwardPrevKey]float64{}
 	for rows.Next() {
 		var key carryforwardPrevKey
-		var val interface{}
-		if err := rows.Scan(&key.provider, &key.resourceSK, &key.serviceSK, &key.changeDate, &val); err != nil {
+		var sumStr string
+		if err := rows.Scan(&key.provider, &key.resourceSK, &key.serviceSK, &key.changeDate, &sumStr); err != nil {
 			return nil, err
 		}
 		key.changeDate = p.normDate(key.changeDate)
-		out[key] = parseDecimal(fmt.Sprint(val))
+		out[key] = parseDecimal(sumStr)
 	}
 	return out, rows.Err()
 }
 
 func (p *Processor) normDate(v string) string {
-	if len(v) >= 10 {
-		return v[:10]
-	}
-	return v
+	return focus.DateOnly(v)
 }
