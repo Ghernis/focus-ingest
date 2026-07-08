@@ -19,3 +19,14 @@ func TestMonthEq_SQLServerCast(t *testing.T) {
 		t.Fatalf("got %q want %q", filter, want)
 	}
 }
+
+func TestDateOnlySelectExpr(t *testing.T) {
+	p := &Processor{Dialect: "sqlite"}
+	if got := p.dateOnlySelectExpr("month_start"); got != "substr(month_start, 1, 10)" {
+		t.Fatalf("sqlite expr=%q", got)
+	}
+	p = &Processor{Dialect: "sqlserver"}
+	if got := p.dateOnlySelectExpr("baseline_change_date"); got != "CONVERT(VARCHAR(10), baseline_change_date, 23)" {
+		t.Fatalf("sqlserver expr=%q", got)
+	}
+}

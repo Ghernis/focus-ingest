@@ -99,11 +99,12 @@ func (p *Processor) loadCarryforwardBaselines(ctx context.Context, tx *sql.Tx, m
 	if p.Dialect == "sqlserver" {
 		where = "CAST(month_start AS DATE) <= @p1"
 	}
-	q := `SELECT month_start, change_date, provider, resource_sk, service_sk,
+	q := fmt.Sprintf(`SELECT %s, %s, provider, resource_sk, service_sk,
 		prior_tier_code, prior_tier_rank, prior_tier_sku_sk, prior_unit_rate
 		FROM fact_resource_tier_change
-		WHERE ` + where + `
-		ORDER BY month_start, change_date, fact_resource_tier_change_id`
+		WHERE %s
+		ORDER BY month_start, change_date, fact_resource_tier_change_id`,
+		p.dateOnlySelectExpr("month_start"), p.dateOnlySelectExpr("change_date"), where)
 	rows, err := tx.QueryContext(ctx, p.q(q), month)
 	if err != nil {
 		return nil, err
@@ -135,17 +136,18 @@ func (p *Processor) loadCarryforwardPrevCumulative(ctx context.Context, tx *sql.
 	if p.Dialect == "sqlserver" {
 		where = "CAST(month_start AS DATE) < @p1"
 	}
-	q := `SELECT provider, resource_sk, service_sk, baseline_change_date,
+	dateExpr := p.dateOnlySelectExpr("baseline_change_date")
+	q := fmt.Sprintf(`SELECT provider, resource_sk, service_sk, %s,
 		SUM(CAST(month_realized_delta AS DECIMAL(28,10)))
 		FROM fact_resource_tier_carryforward
-		WHERE ` + where + `
-		GROUP BY provider, resource_sk, service_sk, baseline_change_date`
+		WHERE %s
+		GROUP BY provider, resource_sk, service_sk, %s`, dateExpr, where, dateExpr)
 	if p.Dialect != "sqlserver" {
-		q = `SELECT provider, resource_sk, service_sk, baseline_change_date,
+		q = fmt.Sprintf(`SELECT provider, resource_sk, service_sk, %s,
 		SUM(month_realized_delta)
 		FROM fact_resource_tier_carryforward
-		WHERE ` + where + `
-		GROUP BY provider, resource_sk, service_sk, baseline_change_date`
+		WHERE %s
+		GROUP BY provider, resource_sk, service_sk, %s`, dateExpr, where, dateExpr)
 	}
 	rows, err := tx.QueryContext(ctx, p.q(q), month)
 	if err != nil {

@@ -93,11 +93,11 @@ func (p *Processor) billingMonthsForBatches(ctx context.Context, batchIDs []int6
 		return nil, nil
 	}
 	ph, args := inClausePlaceholders(p.Dialect, batchIDs, 1)
-	q := fmt.Sprintf(`SELECT DISTINCT CAST(billing_period_start AS VARCHAR(10))
+	q := fmt.Sprintf(`SELECT DISTINCT %s
 		FROM fact_focus_cost_daily
 		WHERE ingestion_batch_id IN (%s)
 		  AND billing_period_start IS NOT NULL
-		ORDER BY 1`, ph)
+		ORDER BY 1`, p.dateOnlySelectExpr("billing_period_start"), ph)
 	rows, err := p.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
@@ -185,4 +185,13 @@ func (p *Processor) monthEq(column, month string) string {
 		return fmt.Sprintf("CAST(%s AS DATE) = '%s'", column, escaped)
 	}
 	return fmt.Sprintf("substr(%s, 1, 10) = '%s'", column, escaped)
+}
+
+// dateOnlySelectExpr returns a SQL expression that yields yyyy-mm-dd text for a date column.
+// On SQL Server, plain CAST(... AS VARCHAR) is locale-dependent and breaks Go string keys.
+func (p *Processor) dateOnlySelectExpr(column string) string {
+	if p.Dialect == "sqlserver" {
+		return fmt.Sprintf("CONVERT(VARCHAR(10), %s, 23)", column)
+	}
+	return fmt.Sprintf("substr(%s, 1, 10)", column)
 }

@@ -70,7 +70,7 @@ func (p *Processor) loadTierDailyForMonth(ctx context.Context, tx *sql.Tx, month
 	if month == "" {
 		return nil, nil
 	}
-	q := `SELECT charge_date, billing_period_start, provider, resource_sk, service_sk, application_sk, environment,
+	q := `SELECT ` + p.dateOnlySelectExpr("charge_date") + `, ` + p.dateOnlySelectExpr("billing_period_start") + `, provider, resource_sk, service_sk, application_sk, environment,
 		tier_code, tier_rank, tier_sku_sk, tier_unit_rate, tier_cost, tier_qty
 		FROM fact_resource_tier_daily WHERE ` + p.monthEq("billing_period_start", month)
 	rows, err := tx.QueryContext(ctx, q)

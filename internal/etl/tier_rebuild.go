@@ -70,7 +70,7 @@ func (p *Processor) deleteTierForMonth(ctx context.Context, tx *sql.Tx, month st
 }
 
 func (p *Processor) distinctFactBillingMonths(ctx context.Context, tx *sql.Tx) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT billing_period_start FROM fact_focus_cost_daily ORDER BY 1`)
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT `+p.dateOnlySelectExpr("billing_period_start")+` FROM fact_focus_cost_daily ORDER BY 1`)
 	if err != nil {
 		return nil, err
 	}
