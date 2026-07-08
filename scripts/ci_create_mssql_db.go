@@ -2,8 +2,8 @@
 // GitHub Actions SQL Server E2E. Connects to master using MSSQL_SA_PASSWORD
 // (default matches .github/workflows/ci.yml).
 //
-// The database is created with the instance collation so it matches tempdb
-// (avoids BIN2 vs CI_AS conflicts when joining #temp expression columns).
+// Uses the instance default collation — no hard-coded collation. Set-based ETL
+// is collation-safe via COLLATE DATABASE_DEFAULT on joins.
 package main
 
 import (
@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	_ "github.com/microsoft/go-mssqldb"
@@ -59,27 +58,10 @@ func main() {
 			time.Sleep(2 * time.Second)
 			continue
 		}
-
-		var collation string
-		if err := db.QueryRowContext(ctx, `SELECT CONVERT(nvarchar(128), SERVERPROPERTY('Collation'))`).Scan(&collation); err != nil {
+		if _, err := db.ExecContext(ctx, `IF DB_ID('focus_e2e') IS NULL CREATE DATABASE focus_e2e;`); err != nil {
 			fail(err)
 		}
-		collation = strings.TrimSpace(collation)
-		if collation == "" {
-			fail(fmt.Errorf("empty server collation"))
-		}
-		// Identifiers only; collation names are alphanumeric + underscore.
-		for _, r := range collation {
-			if !(r == '_' || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
-				fail(fmt.Errorf("unexpected collation name %q", collation))
-			}
-		}
-
-		createSQL := fmt.Sprintf(`IF DB_ID('focus_e2e') IS NULL CREATE DATABASE focus_e2e COLLATE %s;`, collation)
-		if _, err := db.ExecContext(ctx, createSQL); err != nil {
-			fail(err)
-		}
-		fmt.Printf("database focus_e2e ready (collation=%s)\n", collation)
+		fmt.Println("database focus_e2e ready")
 		return
 	}
 	fail(fmt.Errorf("sql server not ready: %w", last))

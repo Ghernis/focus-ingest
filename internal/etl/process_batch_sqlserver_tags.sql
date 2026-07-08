@@ -9,9 +9,10 @@ INTO #tag_pairs
 FROM dbo.fact_focus_cost_daily f
 INNER JOIN #stg_norm n
   ON n.charge_date = f.charge_date
- AND n.charge_description_hash = f.charge_description_hash
+ AND n.charge_description_hash COLLATE DATABASE_DEFAULT = f.charge_description_hash
 INNER JOIN dbo.dim_account a ON a.account_sk = f.billing_account_sk
-  AND a.account_id = n.BillingAccountId AND a.provider = n.provider_code
+  AND a.account_id = n.BillingAccountId COLLATE DATABASE_DEFAULT
+  AND a.provider = n.provider_code COLLATE DATABASE_DEFAULT
 CROSS APPLY OPENJSON(n.raw_tags_json) j
 WHERE f.ingestion_batch_id = @IngestionBatchId
   AND n.raw_tags_json IS NOT NULL
@@ -22,13 +23,17 @@ INSERT INTO dbo.dim_tag (tag_key, tag_value)
 SELECT DISTINCT tag_key, tag_value
 FROM #tag_pairs tp
 WHERE NOT EXISTS (
-  SELECT 1 FROM dbo.dim_tag t WHERE t.tag_key = tp.tag_key AND t.tag_value = tp.tag_value
+  SELECT 1 FROM dbo.dim_tag t
+  WHERE t.tag_key = tp.tag_key COLLATE DATABASE_DEFAULT
+    AND t.tag_value = tp.tag_value COLLATE DATABASE_DEFAULT
 );
 
 INSERT INTO dbo.bridge_cost_tag (cost_daily_id, tag_sk)
 SELECT DISTINCT tp.cost_daily_id, t.tag_sk
 FROM #tag_pairs tp
-INNER JOIN dbo.dim_tag t ON t.tag_key = tp.tag_key AND t.tag_value = tp.tag_value
+INNER JOIN dbo.dim_tag t
+  ON t.tag_key = tp.tag_key COLLATE DATABASE_DEFAULT
+ AND t.tag_value = tp.tag_value COLLATE DATABASE_DEFAULT
 WHERE NOT EXISTS (
   SELECT 1 FROM dbo.bridge_cost_tag b
   WHERE b.cost_daily_id = tp.cost_daily_id AND b.tag_sk = t.tag_sk

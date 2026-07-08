@@ -66,7 +66,6 @@ Document which target was used in the E2E report.
 docker run --name focus-mssql \
   -e ACCEPT_EULA=Y \
   -e MSSQL_SA_PASSWORD='Your_password123' \
-  -e MSSQL_COLLATION='SQL_Latin1_General_CP1_CI_AS' \
   -p 1433:1433 \
   -d mcr.microsoft.com/mssql/server:2022-latest
 
@@ -77,4 +76,4 @@ FOCUS_E2E_SQLSERVER_DSN='sqlserver://sa:Your_password123@localhost:1433?database
   go test ./internal/etl/ -run TestE2EParquetHistoryOverlap_SQLServer_OptIn -count=1 -v
 ```
 
-Use `encrypt=disable` (and/or `TrustServerCertificate=true`) against the Docker image. Prefer `MSSQL_COLLATION=SQL_Latin1_General_CP1_CI_AS` so instance/`tempdb` match Azure-like warehouses. `scripts/ci_create_mssql_db.go` creates `focus_e2e` with the **instance** collation, and set-based ETL forces `#stg_norm` expression columns to `COLLATE DATABASE_DEFAULT` (avoids BIN2 vs CI_AS join failures). The test calls `ResetSchema` — only point the DSN at a disposable database.
+Use `encrypt=disable` (and/or `TrustServerCertificate=true`) against the Docker image. CI does **not** hard-code instance collation — Docker may use `Latin1_General_BIN2` while warehouse tables use the database default. Set-based ETL is portable: string joins between `#temp` and permanent tables use `COLLATE DATABASE_DEFAULT` (current user DB). The test calls `ResetSchema` — only point the DSN at a disposable database.

@@ -1,5 +1,11 @@
 -- Set-based ETL: staging → dimensions → fact_focus_cost_daily
 -- @IngestionBatchId and @FocusVersion are supplied by focus-ingest (see process_batch_sqlserver.go)
+--
+-- Collation note: expression columns in #temp tables inherit tempdb collation, which may
+-- differ from the user database (common on Docker SQL Server). All string comparisons
+-- between #stg_norm / derived sources and permanent tables use COLLATE DATABASE_DEFAULT
+-- so the comparison uses the *current* (warehouse) database collation — portable across
+-- Azure SQL and local Docker without forcing instance collation.
 
 -- ---------------------------------------------------------------------
 -- Helper: normalize FOCUS provider to dim provider code
@@ -8,60 +14,44 @@ IF OBJECT_ID('tempdb..#stg_norm') IS NOT NULL DROP TABLE #stg_norm;
 
 SELECT
   s.*,
-  CAST(CASE
+  CASE
     WHEN COALESCE(s.Provider, s.source_provider) IN ('AWS', 'Amazon Web Services') THEN 'AWS'
     WHEN COALESCE(s.Provider, s.source_provider) IN ('Microsoft', 'Azure') THEN 'AZURE'
     WHEN COALESCE(s.Provider, s.source_provider) IN ('Google Cloud', 'GCP', 'Google') THEN 'GCP'
     ELSE NULL
-  END AS VARCHAR(10)) COLLATE DATABASE_DEFAULT AS provider_code,
+  END AS provider_code,
   CAST(s.ChargePeriodStart AS DATE) AS charge_date,
   CAST(s.BillingPeriodStart AS DATE) AS billing_period_start_date,
   CAST(s.BillingPeriodEnd AS DATE) AS billing_period_end_date,
-  CAST(CASE
+  CASE
     WHEN LOWER(LTRIM(RTRIM(s.ChargeCategory))) = 'usage' THEN 'Usage'
     WHEN LOWER(LTRIM(RTRIM(s.ChargeCategory))) = 'purchase' THEN 'Purchase'
     WHEN LOWER(LTRIM(RTRIM(s.ChargeCategory))) = 'tax' THEN 'Tax'
     WHEN LOWER(LTRIM(RTRIM(s.ChargeCategory))) = 'credit' THEN 'Credit'
     WHEN LOWER(LTRIM(RTRIM(s.ChargeCategory))) = 'adjustment' THEN 'Adjustment'
     ELSE s.ChargeCategory
-  END AS VARCHAR(32)) COLLATE DATABASE_DEFAULT AS charge_category_norm,
-  CAST(CASE WHEN NULLIF(LTRIM(RTRIM(s.PricingCategory)), '') IS NULL THEN NULL
+  END AS charge_category_norm,
+  CASE WHEN NULLIF(LTRIM(RTRIM(s.PricingCategory)), '') IS NULL THEN NULL
        WHEN LOWER(s.PricingCategory) = 'standard' THEN 'Standard'
        WHEN LOWER(s.PricingCategory) = 'committed' THEN 'Committed'
        WHEN LOWER(s.PricingCategory) = 'dynamic' THEN 'Dynamic'
        ELSE 'Other'
-  END AS VARCHAR(32)) COLLATE DATABASE_DEFAULT AS pricing_category_norm,
-  CONVERT(CHAR(64), HASHBYTES('SHA2_256', COALESCE(s.ChargeDescription, N'')), 2) COLLATE DATABASE_DEFAULT AS charge_description_hash,
-  CAST(NULLIF(LTRIM(RTRIM(s.SkuId)), '') AS VARCHAR(128)) COLLATE DATABASE_DEFAULT AS sku_id_norm,
-  CAST(NULLIF(LTRIM(RTRIM(s.SkuPriceId)), '') AS VARCHAR(256)) COLLATE DATABASE_DEFAULT AS sku_price_id_norm,
-  CAST(COALESCE(NULLIF(LTRIM(RTRIM(s.ServiceName)), ''), 'UNKNOWN') AS VARCHAR(256)) COLLATE DATABASE_DEFAULT AS service_code_norm,
-  CAST(NULLIF(LTRIM(RTRIM(s.SubAccountId)), '') AS VARCHAR(512)) COLLATE DATABASE_DEFAULT AS sub_account_id_norm,
-  CAST(NULLIF(LTRIM(RTRIM(s.RegionId)), '') AS VARCHAR(128)) COLLATE DATABASE_DEFAULT AS region_id_norm,
-  CAST(NULLIF(LTRIM(RTRIM(s.ResourceId)), '') AS VARCHAR(512)) COLLATE DATABASE_DEFAULT AS resource_id_norm,
-  CAST(NULLIF(LTRIM(RTRIM(s.CommitmentDiscountId)), '') AS VARCHAR(512)) COLLATE DATABASE_DEFAULT AS commitment_discount_id_norm,
-  CAST(NULLIF(LTRIM(RTRIM(s.CapacityReservationId)), '') AS VARCHAR(512)) COLLATE DATABASE_DEFAULT AS capacity_reservation_id_norm,
-  CAST(NULLIF(LTRIM(RTRIM(s.ChargeFrequency)), '') AS VARCHAR(32)) COLLATE DATABASE_DEFAULT AS charge_frequency_norm
+  END AS pricing_category_norm,
+  CONVERT(CHAR(64), HASHBYTES('SHA2_256', COALESCE(s.ChargeDescription, N'')), 2) AS charge_description_hash,
+  NULLIF(LTRIM(RTRIM(s.SkuId)), '') AS sku_id_norm,
+  NULLIF(LTRIM(RTRIM(s.SkuPriceId)), '') AS sku_price_id_norm,
+  COALESCE(NULLIF(LTRIM(RTRIM(s.ServiceName)), ''), 'UNKNOWN') AS service_code_norm,
+  NULLIF(LTRIM(RTRIM(s.SubAccountId)), '') AS sub_account_id_norm,
+  NULLIF(LTRIM(RTRIM(s.RegionId)), '') AS region_id_norm,
+  NULLIF(LTRIM(RTRIM(s.ResourceId)), '') AS resource_id_norm,
+  NULLIF(LTRIM(RTRIM(s.CommitmentDiscountId)), '') AS commitment_discount_id_norm,
+  NULLIF(LTRIM(RTRIM(s.CapacityReservationId)), '') AS capacity_reservation_id_norm,
+  NULLIF(LTRIM(RTRIM(s.ChargeFrequency)), '') AS charge_frequency_norm
 INTO #stg_norm
 FROM dbo.stg_focus_cost_line s
 WHERE s.ingestion_batch_id = @IngestionBatchId
   AND s.ChargePeriodStart IS NOT NULL
   AND s.BillingAccountId IS NOT NULL;
-
--- SELECT INTO can leave expression columns on tempdb collation (e.g. Latin1_General_BIN2
--- on Docker) while dim tables use the user-database collation. Force DATABASE_DEFAULT.
-ALTER TABLE #stg_norm ALTER COLUMN provider_code VARCHAR(10) COLLATE DATABASE_DEFAULT NULL;
-ALTER TABLE #stg_norm ALTER COLUMN charge_category_norm VARCHAR(32) COLLATE DATABASE_DEFAULT NULL;
-ALTER TABLE #stg_norm ALTER COLUMN pricing_category_norm VARCHAR(32) COLLATE DATABASE_DEFAULT NULL;
-ALTER TABLE #stg_norm ALTER COLUMN charge_description_hash CHAR(64) COLLATE DATABASE_DEFAULT NOT NULL;
-ALTER TABLE #stg_norm ALTER COLUMN sku_id_norm VARCHAR(256) COLLATE DATABASE_DEFAULT NULL;
-ALTER TABLE #stg_norm ALTER COLUMN sku_price_id_norm VARCHAR(512) COLLATE DATABASE_DEFAULT NULL;
-ALTER TABLE #stg_norm ALTER COLUMN service_code_norm VARCHAR(256) COLLATE DATABASE_DEFAULT NOT NULL;
-ALTER TABLE #stg_norm ALTER COLUMN sub_account_id_norm VARCHAR(512) COLLATE DATABASE_DEFAULT NULL;
-ALTER TABLE #stg_norm ALTER COLUMN region_id_norm VARCHAR(128) COLLATE DATABASE_DEFAULT NULL;
-ALTER TABLE #stg_norm ALTER COLUMN resource_id_norm VARCHAR(512) COLLATE DATABASE_DEFAULT NULL;
-ALTER TABLE #stg_norm ALTER COLUMN commitment_discount_id_norm VARCHAR(512) COLLATE DATABASE_DEFAULT NULL;
-ALTER TABLE #stg_norm ALTER COLUMN capacity_reservation_id_norm VARCHAR(512) COLLATE DATABASE_DEFAULT NULL;
-ALTER TABLE #stg_norm ALTER COLUMN charge_frequency_norm VARCHAR(32) COLLATE DATABASE_DEFAULT NULL;
 
 DELETE FROM #stg_norm WHERE provider_code IS NULL;
 
@@ -78,7 +68,8 @@ USING (
   FROM #stg_norm
   GROUP BY provider_code, BillingAccountId
 ) AS s
-ON t.provider = s.provider AND t.account_id = s.account_id
+ON t.provider = s.provider COLLATE DATABASE_DEFAULT
+ AND t.account_id = s.account_id COLLATE DATABASE_DEFAULT
 WHEN MATCHED THEN UPDATE SET
   account_name = COALESCE(s.account_name, t.account_name),
   billing_account_type = COALESCE(s.billing_account_type, t.billing_account_type)
@@ -98,11 +89,13 @@ USING (
     MAX(a.account_sk) AS billing_account_sk
   FROM #stg_norm n
   INNER JOIN dbo.dim_account a
-    ON a.provider = n.provider_code AND a.account_id = n.BillingAccountId
+    ON a.provider = n.provider_code COLLATE DATABASE_DEFAULT
+   AND a.account_id = n.BillingAccountId COLLATE DATABASE_DEFAULT
   WHERE n.sub_account_id_norm IS NOT NULL
   GROUP BY n.provider_code, n.sub_account_id_norm
 ) AS s
-ON t.provider = s.provider AND t.sub_account_id = s.sub_account_id
+ON t.provider = s.provider COLLATE DATABASE_DEFAULT
+ AND t.sub_account_id = s.sub_account_id COLLATE DATABASE_DEFAULT
 WHEN MATCHED THEN UPDATE SET
   sub_account_name = COALESCE(s.sub_account_name, t.sub_account_name),
   sub_account_type = COALESCE(s.sub_account_type, t.sub_account_type),
@@ -124,7 +117,8 @@ USING (
   FROM #stg_norm
   GROUP BY provider_code, service_code_norm
 ) AS s
-ON t.provider = s.provider AND t.service_code = s.service_code
+ON t.provider = s.provider COLLATE DATABASE_DEFAULT
+ AND t.service_code = s.service_code COLLATE DATABASE_DEFAULT
 WHEN MATCHED THEN UPDATE SET
   service_name = s.service_name,
   service_category = COALESCE(s.service_category, t.service_category),
@@ -139,7 +133,8 @@ USING (
   WHERE region_id_norm IS NOT NULL
   GROUP BY provider_code, region_id_norm
 ) AS s
-ON t.provider = s.provider AND t.region_id = s.region_id
+ON t.provider = s.provider COLLATE DATABASE_DEFAULT
+ AND t.region_id = s.region_id COLLATE DATABASE_DEFAULT
 WHEN MATCHED THEN UPDATE SET region_name = COALESCE(s.region_name, t.region_name)
 WHEN NOT MATCHED THEN INSERT (provider, region_id, region_name)
   VALUES (s.provider, s.region_id, s.region_name);
@@ -157,8 +152,9 @@ USING (
   WHERE sku_id_norm IS NOT NULL
   GROUP BY provider_code, sku_id_norm, sku_price_id_norm
 ) AS s
-ON t.provider = s.provider AND t.sku_id = s.sku_id
-   AND ISNULL(NULLIF(LTRIM(RTRIM(t.sku_price_id)), ''), '~') = ISNULL(s.sku_price_id, '~')
+ON t.provider = s.provider COLLATE DATABASE_DEFAULT
+ AND t.sku_id = s.sku_id COLLATE DATABASE_DEFAULT
+ AND ISNULL(NULLIF(LTRIM(RTRIM(t.sku_price_id)), ''), '~') = ISNULL(s.sku_price_id COLLATE DATABASE_DEFAULT, '~')
 WHEN MATCHED THEN UPDATE SET
   sku_meter = COALESCE(s.sku_meter, t.sku_meter),
   sku_price_details = COALESCE(s.sku_price_details, t.sku_price_details),
@@ -179,7 +175,8 @@ USING (
   WHERE commitment_discount_id_norm IS NOT NULL
   GROUP BY provider_code, commitment_discount_id_norm
 ) AS s
-ON t.provider = s.provider AND t.commitment_discount_id = s.commitment_discount_id
+ON t.provider = s.provider COLLATE DATABASE_DEFAULT
+ AND t.commitment_discount_id = s.commitment_discount_id COLLATE DATABASE_DEFAULT
 WHEN MATCHED THEN UPDATE SET
   commitment_discount_name = COALESCE(s.commitment_discount_name, t.commitment_discount_name),
   commitment_discount_type = COALESCE(s.commitment_discount_type, t.commitment_discount_type),
@@ -200,7 +197,8 @@ USING (
   WHERE capacity_reservation_id_norm IS NOT NULL
   GROUP BY provider_code, capacity_reservation_id_norm
 ) AS s
-ON t.provider = s.provider AND t.capacity_reservation_id = s.capacity_reservation_id
+ON t.provider = s.provider COLLATE DATABASE_DEFAULT
+ AND t.capacity_reservation_id = s.capacity_reservation_id COLLATE DATABASE_DEFAULT
 WHEN MATCHED THEN UPDATE SET capacity_reservation_status = COALESCE(s.capacity_reservation_status, t.capacity_reservation_status)
 WHEN NOT MATCHED THEN INSERT (provider, capacity_reservation_id, capacity_reservation_status)
   VALUES (s.provider, s.capacity_reservation_id, s.capacity_reservation_status);
@@ -226,11 +224,18 @@ WHEN NOT MATCHED THEN INSERT (provider, capacity_reservation_id, capacity_reserv
     MAX(n.raw_tags_json) AS tags_json,
     MIN(n.charge_date) AS valid_from
   FROM #stg_norm n
-  INNER JOIN dbo.dim_account a ON a.provider = n.provider_code AND a.account_id = n.BillingAccountId
-  LEFT JOIN dbo.dim_sub_account sa ON sa.provider = n.provider_code AND sa.sub_account_id = n.sub_account_id_norm
-  INNER JOIN dbo.dim_service svc ON svc.provider = n.provider_code
-    AND svc.service_code = n.service_code_norm
-  LEFT JOIN dbo.dim_region reg ON reg.provider = n.provider_code AND reg.region_id = n.region_id_norm
+  INNER JOIN dbo.dim_account a
+    ON a.provider = n.provider_code COLLATE DATABASE_DEFAULT
+   AND a.account_id = n.BillingAccountId COLLATE DATABASE_DEFAULT
+  LEFT JOIN dbo.dim_sub_account sa
+    ON sa.provider = n.provider_code COLLATE DATABASE_DEFAULT
+   AND sa.sub_account_id = n.sub_account_id_norm COLLATE DATABASE_DEFAULT
+  INNER JOIN dbo.dim_service svc
+    ON svc.provider = n.provider_code COLLATE DATABASE_DEFAULT
+   AND svc.service_code = n.service_code_norm COLLATE DATABASE_DEFAULT
+  LEFT JOIN dbo.dim_region reg
+    ON reg.provider = n.provider_code COLLATE DATABASE_DEFAULT
+   AND reg.region_id = n.region_id_norm COLLATE DATABASE_DEFAULT
   WHERE n.resource_id_norm IS NOT NULL
   GROUP BY n.provider_code, n.resource_id_norm
 )
@@ -244,8 +249,8 @@ SELECT
 FROM src s
 WHERE NOT EXISTS (
   SELECT 1 FROM dbo.dim_resource r
-  WHERE r.provider = s.provider
-    AND r.global_resource_id = s.global_resource_id
+  WHERE r.provider = s.provider COLLATE DATABASE_DEFAULT
+    AND r.global_resource_id = s.global_resource_id COLLATE DATABASE_DEFAULT
     AND r.valid_to IS NULL
 );
 
@@ -284,23 +289,38 @@ SELECT
   MAX(n.ChargePeriodEnd) AS last_charge_period_end
 INTO #daily_rollup
 FROM #stg_norm n
-INNER JOIN dbo.dim_account a ON a.provider = n.provider_code AND a.account_id = n.BillingAccountId
-INNER JOIN dbo.dim_service svc ON svc.provider = n.provider_code
-  AND svc.service_code = n.service_code_norm
-INNER JOIN dbo.dim_charge_category cc ON cc.charge_category = n.charge_category_norm
-LEFT JOIN dbo.dim_sub_account sa ON sa.provider = n.provider_code AND sa.sub_account_id = n.sub_account_id_norm
-LEFT JOIN dbo.dim_resource res ON res.provider = n.provider_code
-  AND res.global_resource_id = n.resource_id_norm AND res.valid_to IS NULL
-LEFT JOIN dbo.dim_sku sku ON sku.provider = n.provider_code
-  AND sku.sku_id = n.sku_id_norm
-  AND ISNULL(NULLIF(LTRIM(RTRIM(sku.sku_price_id)), ''), '~') = ISNULL(n.sku_price_id_norm, '~')
-LEFT JOIN dbo.dim_region reg ON reg.provider = n.provider_code AND reg.region_id = n.region_id_norm
-LEFT JOIN dbo.dim_charge_frequency cf ON cf.charge_frequency = n.charge_frequency_norm
-LEFT JOIN dbo.dim_pricing_category pc ON pc.pricing_category = n.pricing_category_norm
-LEFT JOIN dbo.dim_commitment_discount cmt ON cmt.provider = n.provider_code
-  AND cmt.commitment_discount_id = n.commitment_discount_id_norm
-LEFT JOIN dbo.dim_capacity_reservation cap ON cap.provider = n.provider_code
-  AND cap.capacity_reservation_id = n.capacity_reservation_id_norm
+INNER JOIN dbo.dim_account a
+  ON a.provider = n.provider_code COLLATE DATABASE_DEFAULT
+ AND a.account_id = n.BillingAccountId COLLATE DATABASE_DEFAULT
+INNER JOIN dbo.dim_service svc
+  ON svc.provider = n.provider_code COLLATE DATABASE_DEFAULT
+ AND svc.service_code = n.service_code_norm COLLATE DATABASE_DEFAULT
+INNER JOIN dbo.dim_charge_category cc
+  ON cc.charge_category = n.charge_category_norm COLLATE DATABASE_DEFAULT
+LEFT JOIN dbo.dim_sub_account sa
+  ON sa.provider = n.provider_code COLLATE DATABASE_DEFAULT
+ AND sa.sub_account_id = n.sub_account_id_norm COLLATE DATABASE_DEFAULT
+LEFT JOIN dbo.dim_resource res
+  ON res.provider = n.provider_code COLLATE DATABASE_DEFAULT
+ AND res.global_resource_id = n.resource_id_norm COLLATE DATABASE_DEFAULT
+ AND res.valid_to IS NULL
+LEFT JOIN dbo.dim_sku sku
+  ON sku.provider = n.provider_code COLLATE DATABASE_DEFAULT
+ AND sku.sku_id = n.sku_id_norm COLLATE DATABASE_DEFAULT
+ AND ISNULL(NULLIF(LTRIM(RTRIM(sku.sku_price_id)), ''), '~') = ISNULL(n.sku_price_id_norm COLLATE DATABASE_DEFAULT, '~')
+LEFT JOIN dbo.dim_region reg
+  ON reg.provider = n.provider_code COLLATE DATABASE_DEFAULT
+ AND reg.region_id = n.region_id_norm COLLATE DATABASE_DEFAULT
+LEFT JOIN dbo.dim_charge_frequency cf
+  ON cf.charge_frequency = n.charge_frequency_norm COLLATE DATABASE_DEFAULT
+LEFT JOIN dbo.dim_pricing_category pc
+  ON pc.pricing_category = n.pricing_category_norm COLLATE DATABASE_DEFAULT
+LEFT JOIN dbo.dim_commitment_discount cmt
+  ON cmt.provider = n.provider_code COLLATE DATABASE_DEFAULT
+ AND cmt.commitment_discount_id = n.commitment_discount_id_norm COLLATE DATABASE_DEFAULT
+LEFT JOIN dbo.dim_capacity_reservation cap
+  ON cap.provider = n.provider_code COLLATE DATABASE_DEFAULT
+ AND cap.capacity_reservation_id = n.capacity_reservation_id_norm COLLATE DATABASE_DEFAULT
 GROUP BY
   n.charge_date, a.account_sk, sa.sub_account_sk, res.resource_sk, svc.service_sk,
   sku.sku_sk, reg.region_sk, cc.charge_category_sk, cf.charge_frequency_sk,
