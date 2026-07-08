@@ -99,6 +99,10 @@ func publishAggregatesMerge(ctx context.Context, local, server *sql.DB, month st
 		fmt.Printf("  merged %d rows to %s\n", n, spec.table)
 	}
 
+	if err := publishTierFactsMerge(ctx, local, tx, month, maps); err != nil {
+		return err
+	}
+
 	if _, err := tx.ExecContext(ctx, `DELETE FROM agg_cost_distribution_monthly WHERE month_start = @p1`, month); err != nil {
 		return fmt.Errorf("delete distribution: %w", err)
 	}

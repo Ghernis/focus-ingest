@@ -69,3 +69,12 @@ func projectedAnnualFromMonthSavings(monthSavings float64, scope string, daysOnN
 		return 0
 	}
 }
+
+func computeCarryForwardMonthDelta(baselineUnitRate, currentMonthQty, currentMonthActualCost float64) (counterfactualCost float64, monthDelta float64) {
+	if currentMonthQty <= 0 {
+		return 0, -currentMonthActualCost
+	}
+	counterfactualCost = baselineUnitRate * currentMonthQty
+	monthDelta = counterfactualCost - currentMonthActualCost
+	return counterfactualCost, monthDelta
+}

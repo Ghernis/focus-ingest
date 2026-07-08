@@ -293,6 +293,74 @@ func TestTierDaily_NullSubAccountIncluded(t *testing.T) {
 	}
 }
 
+func TestTierCarryForward_MultiMonthBaselineAndCumulative(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	path := filepath.Join(t.TempDir(), "tier_carryforward_multi.db")
+	s, err := store.OpenSQLite(path, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.ApplySchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Jan baseline tier (D4s @ 10).
+	importAzureVMRow(ctx, t, s, "cf-jan.parquet", "2024-01-15", "2024-01-01", "vm-cf",
+		"DZH318Z08M9W", "DZH318Z08M9W_004T_1 Compute Hour", "D4s v5", "10", "100")
+	// Feb downsize to D2s @ 4.
+	importAzureVMRow(ctx, t, s, "cf-feb.parquet", "2024-02-15", "2024-02-01", "vm-cf",
+		"DZH318Z08M9W", "DZH318Z08M9W_0061_1 Compute Hour", "D2s v5", "10", "40")
+	// Mar stays on D2s @ 4 (same savings versus Jan baseline).
+	importAzureVMRow(ctx, t, s, "cf-mar.parquet", "2024-03-15", "2024-03-01", "vm-cf",
+		"DZH318Z08M9W", "DZH318Z08M9W_0061_1 Compute Hour", "D2s v5", "10", "40")
+
+	if _, err := s.RebuildAggregates(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+
+	db := openTierTestDB(t, path)
+	defer db.Close()
+
+	var monthDeltaFeb, cumulativeFeb, baselineRateFeb float64
+	if err := db.QueryRowContext(ctx, `
+		SELECT CAST(month_realized_delta AS REAL), CAST(cumulative_realized_delta AS REAL), CAST(baseline_unit_rate AS REAL)
+		FROM fact_resource_tier_carryforward c
+		INNER JOIN dim_resource r ON c.resource_sk = r.resource_sk
+		WHERE c.month_start = '2024-02-01' AND r.global_resource_id = 'vm-cf'`).Scan(&monthDeltaFeb, &cumulativeFeb, &baselineRateFeb); err != nil {
+		t.Fatal(err)
+	}
+	if baselineRateFeb != 10 {
+		t.Fatalf("feb baseline_unit_rate=%v want 10", baselineRateFeb)
+	}
+	if monthDeltaFeb != 60 {
+		t.Fatalf("feb month_realized_delta=%v want 60", monthDeltaFeb)
+	}
+	if cumulativeFeb != 60 {
+		t.Fatalf("feb cumulative_realized_delta=%v want 60", cumulativeFeb)
+	}
+
+	var monthDeltaMar, cumulativeMar, baselineRateMar float64
+	if err := db.QueryRowContext(ctx, `
+		SELECT CAST(month_realized_delta AS REAL), CAST(cumulative_realized_delta AS REAL), CAST(baseline_unit_rate AS REAL)
+		FROM fact_resource_tier_carryforward c
+		INNER JOIN dim_resource r ON c.resource_sk = r.resource_sk
+		WHERE c.month_start = '2024-03-01' AND r.global_resource_id = 'vm-cf'`).Scan(&monthDeltaMar, &cumulativeMar, &baselineRateMar); err != nil {
+		t.Fatal(err)
+	}
+	if baselineRateMar != 10 {
+		t.Fatalf("mar baseline_unit_rate=%v want 10", baselineRateMar)
+	}
+	if monthDeltaMar != 60 {
+		t.Fatalf("mar month_realized_delta=%v want 60", monthDeltaMar)
+	}
+	if cumulativeMar != 120 {
+		t.Fatalf("mar cumulative_realized_delta=%v want 120", cumulativeMar)
+	}
+}
+
 func importAzureVMRow(ctx context.Context, t *testing.T, s store.Store, file, chargeDate, billingMonth, resourceID, skuID, skuPriceID, skuMeter, qty, cost string) {
 	importAzureServiceRow(ctx, t, s, file, chargeDate, billingMonth, resourceID, skuID, skuPriceID, skuMeter, qty, cost, "Virtual Machines")
 }

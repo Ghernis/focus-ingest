@@ -36,5 +36,9 @@ func publishAggregates(ctx context.Context, local, server *sql.DB, month string,
 		fmt.Printf("  published %d rows to %s\n", n, spec.table)
 	}
 
+	if err := publishTierFactsForMonth(ctx, local, tx, month, maps); err != nil {
+		return err
+	}
+
 	return tx.Commit()
 }

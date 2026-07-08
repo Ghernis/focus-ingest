@@ -85,6 +85,7 @@ func (p *Processor) deleteAggregatesForMonth(ctx context.Context, tx *sql.Tx, mo
 		{"agg_savings_summary", m},
 		{"fact_resource_tier_daily", bm},
 		{"fact_resource_tier_change", m},
+		{"fact_resource_tier_carryforward", m},
 		{"agg_resource_tier_change_monthly", m},
 		{"agg_resource_tier_change_intramonth", m},
 		{"agg_tier_change_summary_monthly", m},

@@ -26,6 +26,9 @@ func (p *Processor) rebuildTierForMonth(ctx context.Context, tx *sql.Tx, month s
 	if err := p.buildFactResourceTierChanges(ctx, tx, month, daily, rollups, refreshed); err != nil {
 		return err
 	}
+	if err := p.buildFactResourceTierCarryforward(ctx, tx, month, daily, refreshed); err != nil {
+		return err
+	}
 	if err := p.buildTierAggregates(ctx, tx, month, rollups, refreshed); err != nil {
 		return err
 	}
@@ -54,6 +57,7 @@ func (p *Processor) deleteTierForMonth(ctx context.Context, tx *sql.Tx, month st
 	for _, t := range []struct{ table, where string }{
 		{"fact_resource_tier_daily", bm},
 		{"fact_resource_tier_change", m},
+		{"fact_resource_tier_carryforward", m},
 		{"agg_resource_tier_change_monthly", m},
 		{"agg_resource_tier_change_intramonth", m},
 		{"agg_tier_change_summary_monthly", m},

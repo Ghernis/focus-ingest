@@ -10,7 +10,7 @@ func (p *Processor) rebuildAggregates(ctx context.Context, tx *sql.Tx, _ []strin
 	tables := []string{
 		"agg_cost_daily", "agg_cost_monthly", "agg_cost_by_tag",
 		"agg_commitment_utilization", "agg_commitment_utilization_daily", "agg_savings_summary",
-		"fact_resource_tier_daily", "fact_resource_tier_change",
+		"fact_resource_tier_daily", "fact_resource_tier_change", "fact_resource_tier_carryforward",
 		"agg_resource_tier_change_monthly", "agg_resource_tier_change_intramonth", "agg_tier_change_summary_monthly",
 		"agg_app_monthly", "agg_app_service_monthly", "agg_app_service_resource_monthly",
 		"agg_cost_distribution_monthly",

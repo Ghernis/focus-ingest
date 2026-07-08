@@ -700,6 +700,34 @@ CREATE TABLE IF NOT EXISTS agg_resource_tier_change_monthly (
   UNIQUE (month_start, provider, resource_sk, service_sk)
 );
 
+CREATE TABLE IF NOT EXISTS fact_resource_tier_carryforward (
+  fact_resource_tier_carryforward_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  month_start                        TEXT NOT NULL,
+  provider                           TEXT NOT NULL,
+  resource_sk                        INTEGER NOT NULL REFERENCES dim_resource(resource_sk),
+  service_sk                         INTEGER NOT NULL,
+  application_sk                     INTEGER NOT NULL REFERENCES dim_application(application_sk),
+  environment                        TEXT NOT NULL DEFAULT '(Unknown)',
+  baseline_change_month              TEXT NOT NULL,
+  baseline_change_date               TEXT NOT NULL,
+  baseline_tier_code                 TEXT NOT NULL,
+  baseline_tier_rank                 INTEGER NOT NULL DEFAULT 0,
+  baseline_tier_sku_sk               INTEGER NOT NULL REFERENCES dim_sku(sku_sk),
+  baseline_unit_rate                 TEXT NOT NULL DEFAULT '0',
+  current_tier_code                  TEXT NOT NULL,
+  current_tier_rank                  INTEGER NOT NULL DEFAULT 0,
+  current_tier_sku_sk                INTEGER NOT NULL REFERENCES dim_sku(sku_sk),
+  current_unit_rate                  TEXT NOT NULL DEFAULT '0',
+  month_quantity                     TEXT NOT NULL DEFAULT '0',
+  month_actual_cost                  TEXT NOT NULL DEFAULT '0',
+  month_counterfactual_cost          TEXT NOT NULL DEFAULT '0',
+  month_realized_delta               TEXT NOT NULL DEFAULT '0',
+  cumulative_realized_delta          TEXT NOT NULL DEFAULT '0',
+  change_direction                   TEXT NOT NULL,
+  refreshed_utc                      TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (month_start, provider, resource_sk, service_sk, baseline_change_date)
+);
+
 CREATE TABLE IF NOT EXISTS agg_resource_tier_change_intramonth (
   agg_resource_tier_change_intramonth_id INTEGER PRIMARY KEY AUTOINCREMENT,
   month_start                            TEXT NOT NULL,
@@ -748,6 +776,8 @@ CREATE INDEX IF NOT EXISTS IX_fact_resource_tier_daily_month
   ON fact_resource_tier_daily (billing_period_start, provider, resource_sk);
 CREATE INDEX IF NOT EXISTS IX_fact_resource_tier_change_month
   ON fact_resource_tier_change (month_start, provider, resource_sk);
+CREATE INDEX IF NOT EXISTS IX_fact_resource_tier_carryforward_month
+  ON fact_resource_tier_carryforward (month_start, provider, resource_sk);
 CREATE INDEX IF NOT EXISTS IX_agg_resource_tier_change_monthly_month
   ON agg_resource_tier_change_monthly (month_start, provider, service_sk);
 CREATE INDEX IF NOT EXISTS IX_agg_resource_tier_change_intramonth_month

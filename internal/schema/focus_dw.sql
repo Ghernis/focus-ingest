@@ -1225,6 +1225,38 @@ BEGIN
 END
 GO
 
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.fact_resource_tier_carryforward') AND type = N'U')
+BEGIN
+  CREATE TABLE dbo.fact_resource_tier_carryforward (
+    fact_resource_tier_carryforward_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+    month_start                        DATE NOT NULL,
+    provider                           VARCHAR(10) NOT NULL,
+    resource_sk                        INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_resource(resource_sk),
+    service_sk                         INT NOT NULL,
+    application_sk                     INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_application(application_sk),
+    environment                        NVARCHAR(128) NOT NULL DEFAULT '(Unknown)',
+    baseline_change_month              DATE NOT NULL,
+    baseline_change_date               DATE NOT NULL,
+    baseline_tier_code                 VARCHAR(128) NOT NULL,
+    baseline_tier_rank                 INT NOT NULL DEFAULT 0,
+    baseline_tier_sku_sk               INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_sku(sku_sk),
+    baseline_unit_rate                 DECIMAL(28,10) NOT NULL DEFAULT 0,
+    current_tier_code                  VARCHAR(128) NOT NULL,
+    current_tier_rank                  INT NOT NULL DEFAULT 0,
+    current_tier_sku_sk                INT NOT NULL FOREIGN KEY REFERENCES dbo.dim_sku(sku_sk),
+    current_unit_rate                  DECIMAL(28,10) NOT NULL DEFAULT 0,
+    month_quantity                     DECIMAL(28,10) NOT NULL DEFAULT 0,
+    month_actual_cost                  DECIMAL(28,10) NOT NULL DEFAULT 0,
+    month_counterfactual_cost          DECIMAL(28,10) NOT NULL DEFAULT 0,
+    month_realized_delta               DECIMAL(28,10) NOT NULL DEFAULT 0,
+    cumulative_realized_delta          DECIMAL(28,10) NOT NULL DEFAULT 0,
+    change_direction                   VARCHAR(16) NOT NULL,
+    refreshed_utc                      DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    UNIQUE (month_start, provider, resource_sk, service_sk, baseline_change_date)
+  );
+END
+GO
+
 IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.agg_resource_tier_change_intramonth') AND type = N'U')
 BEGIN
   CREATE TABLE dbo.agg_resource_tier_change_intramonth (
@@ -1316,6 +1348,11 @@ GO
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_fact_resource_tier_change_month' AND object_id = OBJECT_ID(N'dbo.fact_resource_tier_change'))
 BEGIN
   CREATE INDEX IX_fact_resource_tier_change_month ON dbo.fact_resource_tier_change (month_start, provider, resource_sk);
+END
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_fact_resource_tier_carryforward_month' AND object_id = OBJECT_ID(N'dbo.fact_resource_tier_carryforward'))
+BEGIN
+  CREATE INDEX IX_fact_resource_tier_carryforward_month ON dbo.fact_resource_tier_carryforward (month_start, provider, resource_sk);
 END
 GO
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_agg_resource_tier_change_monthly_month' AND object_id = OBJECT_ID(N'dbo.agg_resource_tier_change_monthly'))
@@ -2050,6 +2087,45 @@ SELECT
     a.refreshed_utc
 FROM dbo.agg_tier_change_summary_monthly a
 INNER JOIN dbo.dim_service svc ON a.service_sk = svc.service_sk;
+GO
+
+CREATE OR ALTER VIEW dbo.vw_pbi_tier_carryforward_monthly AS
+SELECT
+  r.month_start,
+  r.provider,
+  r.resource_sk,
+  res.name AS resource_name,
+  res.resource_type,
+  r.service_sk,
+  svc.service_name,
+  r.application_sk,
+  app.application_name,
+  r.environment,
+  r.baseline_change_month,
+  r.baseline_change_date,
+  r.baseline_tier_code,
+  r.baseline_tier_rank,
+  r.baseline_tier_sku_sk,
+  bs.sku_meter AS baseline_sku_meter,
+  r.baseline_unit_rate,
+  r.current_tier_code,
+  r.current_tier_rank,
+  r.current_tier_sku_sk,
+  cs.sku_meter AS current_sku_meter,
+  r.current_unit_rate,
+  r.month_quantity,
+  r.month_actual_cost,
+  r.month_counterfactual_cost,
+  r.month_realized_delta,
+  r.cumulative_realized_delta,
+  r.change_direction,
+  r.refreshed_utc
+FROM dbo.fact_resource_tier_carryforward r
+INNER JOIN dbo.dim_resource res ON r.resource_sk = res.resource_sk
+INNER JOIN dbo.dim_service svc ON r.service_sk = svc.service_sk
+INNER JOIN dbo.dim_application app ON r.application_sk = app.application_sk
+INNER JOIN dbo.dim_sku bs ON r.baseline_tier_sku_sk = bs.sku_sk
+INNER JOIN dbo.dim_sku cs ON r.current_tier_sku_sk = cs.sku_sk;
 GO
 
 CREATE OR ALTER VIEW dbo.vw_pbi_savings_summary AS

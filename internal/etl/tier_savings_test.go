@@ -66,3 +66,23 @@ func TestTierChangeDirection_PrefersRate(t *testing.T) {
 		t.Fatalf("got %s want DOWNSIZE", got)
 	}
 }
+
+func TestComputeCarryForwardMonthDelta_Positive(t *testing.T) {
+	counterfactual, delta := computeCarryForwardMonthDelta(10, 10, 40)
+	if counterfactual != 100 {
+		t.Fatalf("counterfactual=%v want 100", counterfactual)
+	}
+	if delta != 60 {
+		t.Fatalf("delta=%v want 60", delta)
+	}
+}
+
+func TestComputeCarryForwardMonthDelta_Negative(t *testing.T) {
+	counterfactual, delta := computeCarryForwardMonthDelta(4, 10, 80)
+	if counterfactual != 40 {
+		t.Fatalf("counterfactual=%v want 40", counterfactual)
+	}
+	if delta != -40 {
+		t.Fatalf("delta=%v want -40", delta)
+	}
+}
