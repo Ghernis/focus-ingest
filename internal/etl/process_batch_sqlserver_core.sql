@@ -200,7 +200,7 @@ WHEN NOT MATCHED THEN INSERT (provider, capacity_reservation_id, capacity_reserv
     MAX(a.account_sk) AS account_sk,
     MAX(sa.sub_account_sk) AS sub_account_sk,
     MAX(svc.service_sk) AS service_sk,
-    MAX(n.region_id_norm) AS region,
+    MAX(reg.region_sk) AS region_sk,
     MAX(n.ResourceName) AS name,
     MAX(JSON_VALUE(n.raw_tags_json, '$.application')) AS application,
     MAX(JSON_VALUE(n.raw_tags_json, '$.environment')) AS environment,
@@ -214,16 +214,17 @@ WHEN NOT MATCHED THEN INSERT (provider, capacity_reservation_id, capacity_reserv
   LEFT JOIN dbo.dim_sub_account sa ON sa.provider = n.provider_code AND sa.sub_account_id = n.sub_account_id_norm
   INNER JOIN dbo.dim_service svc ON svc.provider = n.provider_code
     AND svc.service_code = n.service_code_norm
+  LEFT JOIN dbo.dim_region reg ON reg.provider = n.provider_code AND reg.region_id = n.region_id_norm
   WHERE n.resource_id_norm IS NOT NULL
   GROUP BY n.provider_code, n.resource_id_norm
 )
 INSERT INTO dbo.dim_resource (
   provider, global_resource_id, resource_type, account_sk, sub_account_sk, service_sk,
-  region, name, application, environment, business, cost_center, owner_email, tags_json, valid_from
+  region_sk, name, application, environment, business, cost_center, owner_email, tags_json, valid_from
 )
 SELECT
   s.provider, s.global_resource_id, s.resource_type, s.account_sk, s.sub_account_sk, s.service_sk,
-  s.region, s.name, s.application, s.environment, s.business, s.cost_center, s.owner_email, s.tags_json, s.valid_from
+  s.region_sk, s.name, s.application, s.environment, s.business, s.cost_center, s.owner_email, s.tags_json, s.valid_from
 FROM src s
 WHERE NOT EXISTS (
   SELECT 1 FROM dbo.dim_resource r
