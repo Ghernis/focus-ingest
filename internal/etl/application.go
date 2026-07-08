@@ -45,14 +45,14 @@ func (p *Processor) applicationCanonSQL() string {
 
 func (p *Processor) applicationDimJoin() string {
 	canon := p.applicationCanonSQL()
-	return fmt.Sprintf("LEFT JOIN dim_application da ON da.application_name = %s", canon)
+	// Join the default row instead of a scalar subquery so application_sk can appear
+	// in GROUP BY on SQL Server (subqueries in GROUP BY are illegal there).
+	return fmt.Sprintf(`LEFT JOIN dim_application da ON da.application_name = %s
+LEFT JOIN dim_application da_unassigned ON da_unassigned.application_name = '(UNASSIGNED)'`, canon)
 }
 
 func (p *Processor) applicationSKExpr() string {
-	if p.Dialect == "sqlserver" {
-		return "COALESCE(da.application_sk, (SELECT TOP 1 application_sk FROM dim_application WHERE application_name = '(UNASSIGNED)'))"
-	}
-	return "COALESCE(da.application_sk, (SELECT application_sk FROM dim_application WHERE application_name = '(UNASSIGNED)'))"
+	return "COALESCE(da.application_sk, da_unassigned.application_sk)"
 }
 
 // ensureApplicationsForFactCanon inserts dim_application rows for every canonical
