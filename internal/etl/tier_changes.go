@@ -157,7 +157,7 @@ func detectIntraMonthTierChanges(daily []tierDailyRow) []tierChangeEvent {
 			prevRun := runs[i-1]
 			newRun := runs[i]
 			changeDate := dayRows[newRun.start].chargeDate
-			daysPrior := newRun.start
+			daysPrior := prevRun.end - prevRun.start + 1
 			daysNew := newRun.end - newRun.start + 1
 
 			var totalQtyNew, counterfactual, monthSavings, newCost float64

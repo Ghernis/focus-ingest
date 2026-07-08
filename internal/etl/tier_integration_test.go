@@ -229,8 +229,110 @@ func TestTierDaily_B2msVM(t *testing.T) {
 	}
 }
 
+// TestTierDaily_NullSubAccountIncluded guards the commit fix that dropped the
+// `f.sub_account_sk IS NOT NULL` filter in buildFactResourceTierDaily. Cost lines
+// with a billing account but no sub-account must still flow into the tier fact
+// (via the COALESCE(sa.billing_account_sk, f.billing_account_sk) join), otherwise
+// tier savings under-report versus third-party billing that counts every line.
+func TestTierDaily_NullSubAccountIncluded(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	path := filepath.Join(t.TempDir(), "tier_nullsub.db")
+	s, err := store.OpenSQLite(path, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.ApplySchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Same resource + month, tier change mid-month, NO sub-account on any line.
+	importAzureVMRowNoSubAccount(ctx, t, s, "ns1.parquet", "2024-06-10", "2024-06-01", "vm-nosub",
+		"DZH318Z08M9W", "DZH318Z08M9W_004T_1 Compute Hour", "D4s v5", "10", "100")
+	importAzureVMRowNoSubAccount(ctx, t, s, "ns2.parquet", "2024-06-20", "2024-06-01", "vm-nosub",
+		"DZH318Z08M9W", "DZH318Z08M9W_0061_1 Compute Hour", "D2s v5", "10", "40")
+
+	if _, err := s.RebuildAggregates(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+
+	db := openTierTestDB(t, path)
+	defer db.Close()
+
+	// Precondition: the fact rows really do have NULL sub_account_sk.
+	var nullSubDaily int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM fact_focus_cost_daily f
+		INNER JOIN dim_resource r ON f.resource_sk = r.resource_sk
+		WHERE r.global_resource_id = 'vm-nosub' AND f.sub_account_sk IS NULL`).Scan(&nullSubDaily); err != nil {
+		t.Fatal(err)
+	}
+	if nullSubDaily == 0 {
+		t.Fatal("test setup invalid: expected cost rows with NULL sub_account_sk")
+	}
+
+	var tierDaily int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM fact_resource_tier_daily d
+		INNER JOIN dim_resource r ON d.resource_sk = r.resource_sk
+		WHERE r.global_resource_id = 'vm-nosub'`).Scan(&tierDaily); err != nil {
+		t.Fatal(err)
+	}
+	if tierDaily == 0 {
+		t.Fatal("regression: NULL sub_account tier rows were dropped from fact_resource_tier_daily")
+	}
+
+	var intraCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agg_resource_tier_change_intramonth WHERE month_start = '2024-06-01'`).Scan(&intraCount); err != nil {
+		t.Fatal(err)
+	}
+	if intraCount != 1 {
+		t.Fatalf("expected 1 intramonth change for NULL sub_account VM, got %d", intraCount)
+	}
+}
+
 func importAzureVMRow(ctx context.Context, t *testing.T, s store.Store, file, chargeDate, billingMonth, resourceID, skuID, skuPriceID, skuMeter, qty, cost string) {
 	importAzureServiceRow(ctx, t, s, file, chargeDate, billingMonth, resourceID, skuID, skuPriceID, skuMeter, qty, cost, "Virtual Machines")
+}
+
+func importAzureVMRowNoSubAccount(ctx context.Context, t *testing.T, s store.Store, file, chargeDate, billingMonth, resourceID, skuID, skuPriceID, skuMeter, qty, cost string) {
+	t.Helper()
+	batchID, err := s.BeginBatch(ctx, store.BatchMeta{
+		SourceProvider: "azure",
+		FocusVersion:   "1.0",
+		SourceFile:     file,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := focus.StagingRow{
+		SourceProvider:     "azure",
+		Provider:           strPtr("Microsoft"),
+		BillingAccountId:   strPtr("bill-1"),
+		ChargePeriodStart:  strPtr(chargeDate + "T00:00:00Z"),
+		ChargePeriodEnd:    strPtr(chargeDate + "T00:00:00Z"),
+		BillingPeriodStart: strPtr(billingMonth),
+		BillingPeriodEnd:   strPtr(billingMonth),
+		ChargeCategory:     strPtr("Usage"),
+		PricingCategory:    strPtr("OnDemand"),
+		ServiceName:        strPtr("Virtual Machines"),
+		ResourceId:         strPtr(resourceID),
+		ResourceType:       strPtr("instance"),
+		SkuId:              strPtr(skuID),
+		SkuPriceId:         strPtr(skuPriceID),
+		SkuMeter:           strPtr(skuMeter),
+		PricingQuantity:    strPtr(qty),
+		BilledCost:         strPtr(cost),
+		EffectiveCost:      strPtr(cost),
+	}
+	if err := s.InsertStaging(ctx, batchID, "1.0", file, []focus.StagingRow{row}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ProcessBatch(ctx, batchID, "1.0"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func importAzureAppServiceRow(ctx context.Context, t *testing.T, s store.Store, file, chargeDate, billingMonth, resourceID, skuID, skuPriceID, skuMeter, qty, cost string) {

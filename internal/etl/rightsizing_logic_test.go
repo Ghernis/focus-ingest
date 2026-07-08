@@ -37,6 +37,9 @@ func TestDetectIntraMonthTierChanges(t *testing.T) {
 	if events[0].changeDate != "2024-03-20" || events[0].priorTierCode != "D4s v5" || events[0].newTierCode != "D2s v5" {
 		t.Fatalf("unexpected event: %+v", events[0])
 	}
+	if events[0].daysPrior != 1 || events[0].daysNew != 1 {
+		t.Fatalf("days prior=%d new=%d want 1/1", events[0].daysPrior, events[0].daysNew)
+	}
 }
 
 func TestDetectIntraMonthTierChanges_MultipleTransitions(t *testing.T) {
@@ -63,5 +66,13 @@ func TestDetectIntraMonthTierChanges_MultipleTransitions(t *testing.T) {
 	}
 	if events[1].monthRealizedSavings != 20 {
 		t.Fatalf("expected second event savings 20, got %v", events[1].monthRealizedSavings)
+	}
+
+	// days_on_prior_tier = length of the run being left, not cumulative index from month start.
+	if events[0].daysPrior != 1 || events[0].daysNew != 1 {
+		t.Fatalf("event 1 days prior=%d new=%d want 1/1", events[0].daysPrior, events[0].daysNew)
+	}
+	if events[1].daysPrior != 1 || events[1].daysNew != 1 {
+		t.Fatalf("event 2 days prior=%d new=%d want 1/1", events[1].daysPrior, events[1].daysNew)
 	}
 }
