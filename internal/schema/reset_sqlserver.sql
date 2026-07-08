@@ -1,37 +1,30 @@
--- Reset FOCUS warehouse on Azure SQL (drops all dbo tables + views).
+-- Reset FOCUS warehouse on Azure SQL (drops all dbo views/tables).
 -- Run once, then: focus-ingest schema apply --connection "<conn>"
 --
--- SQL Server has no DROP SCHEMA CASCADE; this disables FKs and drops objects.
-
-IF OBJECT_ID(N'dbo.vw_pbi_cost_monthly', N'V') IS NOT NULL DROP VIEW dbo.vw_pbi_cost_monthly;
-IF OBJECT_ID(N'dbo.vw_pbi_cost_daily', N'V') IS NOT NULL DROP VIEW dbo.vw_pbi_cost_daily;
-IF OBJECT_ID(N'dbo.vw_pbi_cost_by_tag', N'V') IS NOT NULL DROP VIEW dbo.vw_pbi_cost_by_tag;
-IF OBJECT_ID(N'dbo.vw_pbi_app_monthly', N'V') IS NOT NULL DROP VIEW dbo.vw_pbi_app_monthly;
-IF OBJECT_ID(N'dbo.vw_pbi_app_service_monthly', N'V') IS NOT NULL DROP VIEW dbo.vw_pbi_app_service_monthly;
-IF OBJECT_ID(N'dbo.vw_pbi_cost_distribution_monthly', N'V') IS NOT NULL DROP VIEW dbo.vw_pbi_cost_distribution_monthly;
-IF OBJECT_ID(N'dbo.vw_pbi_cost_anomaly_monthly', N'V') IS NOT NULL DROP VIEW dbo.vw_pbi_cost_anomaly_monthly;
-IF OBJECT_ID(N'dbo.vw_pbi_commitment_utilization', N'V') IS NOT NULL DROP VIEW dbo.vw_pbi_commitment_utilization;
-IF OBJECT_ID(N'dbo.vw_pbi_savings_summary', N'V') IS NOT NULL DROP VIEW dbo.vw_pbi_savings_summary;
-IF OBJECT_ID(N'dbo.vw_pbi_tier_change_resource_monthly', N'V') IS NOT NULL DROP VIEW dbo.vw_pbi_tier_change_resource_monthly;
-IF OBJECT_ID(N'dbo.vw_pbi_tier_change_intramonth', N'V') IS NOT NULL DROP VIEW dbo.vw_pbi_tier_change_intramonth;
-IF OBJECT_ID(N'dbo.vw_pbi_tier_change_summary_monthly', N'V') IS NOT NULL DROP VIEW dbo.vw_pbi_tier_change_summary_monthly;
+-- SQL Server has no DROP SCHEMA CASCADE. Drop views, foreign keys, then tables.
 
 DECLARE @sql NVARCHAR(MAX) = N'';
 
-SELECT @sql = @sql + N'ALTER TABLE ' + QUOTENAME(s.name) + N'.' + QUOTENAME(t.name) + N' NOCHECK CONSTRAINT ALL;'
-FROM sys.tables t
-INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
-WHERE s.name = N'dbo';
+SELECT @sql = @sql + N'DROP VIEW ' + QUOTENAME(SCHEMA_NAME(v.schema_id)) + N'.' + QUOTENAME(v.name) + N';'
+FROM sys.views v
+WHERE SCHEMA_NAME(v.schema_id) = N'dbo';
 
-EXEC sp_executesql @sql;
+IF @sql <> N'' EXEC sp_executesql @sql;
+SET @sql = N'';
+
+SELECT @sql = @sql + N'ALTER TABLE ' + QUOTENAME(OBJECT_SCHEMA_NAME(f.parent_object_id)) + N'.' + QUOTENAME(OBJECT_NAME(f.parent_object_id))
+    + N' DROP CONSTRAINT ' + QUOTENAME(f.name) + N';'
+FROM sys.foreign_keys f
+WHERE OBJECT_SCHEMA_NAME(f.parent_object_id) = N'dbo';
+
+IF @sql <> N'' EXEC sp_executesql @sql;
 SET @sql = N'';
 
 SELECT @sql = @sql + N'DROP TABLE IF EXISTS ' + QUOTENAME(s.name) + N'.' + QUOTENAME(t.name) + N';'
 FROM sys.tables t
 INNER JOIN sys.schemas s ON t.schema_id = s.schema_id
-WHERE s.name = N'dbo'
-ORDER BY t.name;
+WHERE s.name = N'dbo';
 
-EXEC sp_executesql @sql;
+IF @sql <> N'' EXEC sp_executesql @sql;
 
 PRINT 'All dbo tables dropped. Run: focus-ingest schema apply --connection "<conn>"';
