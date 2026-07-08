@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_SA_PASSWORD: Your_password123
+        ports:
+          - 1433:1433
+        # Readiness is enforced in "Wait for SQL Server port" + ci_create_mssql_db.go
+        # (image sqlcmd paths vary; avoid blocking the job on a fragile health-cmd).
+        options: >-
+          --health-cmd "timeout 1 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/1433'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+          --health-start-period 20s
+
+    env:
+      FOCUS_E2E_SQLSERVER_DSN: sqlserver://sa:Your_password123@localhost:1433?database=focus_e2e&encrypt=disable&TrustServerCertificate=true
+      MSSQL_SA_PASSWORD: Your_password123
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.7'
+
+      - name: Wait for SQL Server port
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            if (echo > /dev/tcp/127.0.0.1/1433) >/dev/null 2>&1; then
+              echo "SQL Server port 1433 is open"
+              exit 0
+            fi
+            echo "Waiting for SQL Server port... ($i)"
+            sleep 2
+          done
+          echo "SQL Server port did not open in time"
+          exit 1
+
+      - name: Create focus_e2e database
+        run: go run ./scripts/ci_create_mssql_db.go
+
+      - name: Run unit and integration tests
+        run: go test ./internal/... -count=1
+
+      - name: Run SQL Server E2E
+        run: go test ./internal/etl/ -run TestE2EParquetHistoryOverlap_SQLServer_OptIn -count=1 -v

@@ -206,6 +206,10 @@ On SQL Server you can stop publishing `--facts` for June once July is live if yo
 4. **`sync-dims --fresh` mid-month** — wipes local facts/staging; only use `--fresh` at month start or for historical one-shot DBs.
 5. **`billing-period` must match** `billing_period_start` in the data (e.g. `2026-06-01`, not `2026-06-15`).
 
+## CI / SQL Server E2E
+
+GitHub Actions (`.github/workflows/ci.yml`) runs `go test ./internal/...` on push/PR and starts a Docker SQL Server service for `TestE2EParquetHistoryOverlap_SQLServer_OptIn` via `FOCUS_E2E_SQLSERVER_DSN`. See `.cursor/skills/e2e-verify/fixtures.md` for the local Docker recipe.
+
 If you want, we can add a small PowerShell helper script that classifies partitions (new vs needs `--force` by last write time) and runs the right import command automatically.
 
 # all billings not final

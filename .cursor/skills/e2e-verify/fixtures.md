@@ -52,5 +52,28 @@ When adding a new feature, extend this table:
 |--------|---------|------|
 | Local SQLite (default) | `focus-ingest --local ...` | Fast E2E, tier/aggs validation |
 | Azure SQL | `focus-ingest --connection ...` | SQL Server dialect, bulk ETL, publish path |
+| Docker SQL Server (CI / local) | `FOCUS_E2E_SQLSERVER_DSN=... go test ./internal/etl/ -run TestE2EParquetHistoryOverlap_SQLServer_OptIn` | Dialect + parquet history E2E without Azure |
 
 Document which target was used in the E2E report.
+
+## SQL Server E2E (Docker)
+
+`TestE2EParquetHistoryOverlap_SQLServer_OptIn` is **opt-in**: it skips unless `FOCUS_E2E_SQLSERVER_DSN` is set. GitHub Actions CI (`.github/workflows/ci.yml`) starts `mcr.microsoft.com/mssql/server:2022-latest`, creates `focus_e2e`, and sets the DSN automatically on push/PR.
+
+### Local Docker
+
+```bash
+docker run --name focus-mssql \
+  -e ACCEPT_EULA=Y \
+  -e MSSQL_SA_PASSWORD='Your_password123' \
+  -p 1433:1433 \
+  -d mcr.microsoft.com/mssql/server:2022-latest
+
+# wait until ready, then:
+MSSQL_SA_PASSWORD='Your_password123' go run ./scripts/ci_create_mssql_db.go
+
+FOCUS_E2E_SQLSERVER_DSN='sqlserver://sa:Your_password123@localhost:1433?database=focus_e2e&encrypt=disable&TrustServerCertificate=true' \
+  go test ./internal/etl/ -run TestE2EParquetHistoryOverlap_SQLServer_OptIn -count=1 -v
+```
+
+Use `encrypt=disable` (and/or `TrustServerCertificate=true`) against the Docker image. The test calls `ResetSchema` — only point the DSN at a disposable database.

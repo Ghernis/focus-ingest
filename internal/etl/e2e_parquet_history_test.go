@@ -116,8 +116,9 @@ func TestE2EParquetHistoryOverlap_SQLServer_OptIn(t *testing.T) {
 	if dsn == "" {
 		t.Skip("set FOCUS_E2E_SQLSERVER_DSN to run SQL Server E2E")
 	}
+	// Docker / CI DSNs typically need encrypt=disable or TrustServerCertificate=true.
 
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
 	s, err := store.OpenSQLServer(dsn, false, true, false)
