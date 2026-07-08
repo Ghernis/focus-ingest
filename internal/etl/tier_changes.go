@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
+
+	"github.com/ghernis/focus_dt/internal/focus"
 )
 
 type tierChangeEvent struct {
@@ -87,6 +89,10 @@ func (p *Processor) loadTierDailyForMonth(ctx context.Context, tx *sql.Tx, month
 		r.tierUnitRate = parseDecimal(unitRateStr)
 		r.tierCost = parseDecimal(costStr)
 		r.tierQty = parseDecimal(qtyStr)
+		// SQL Server DATE/DATETIME scans often include a time suffix; normalize for
+		// exact month matching in dominantTierByMonth / MoM detection.
+		r.chargeDate = focus.DateOnly(r.chargeDate)
+		r.billingMonth = focus.DateOnly(r.billingMonth)
 		out = append(out, r)
 	}
 	return out, rows.Err()

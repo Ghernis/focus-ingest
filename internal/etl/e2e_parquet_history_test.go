@@ -213,7 +213,7 @@ func queryCarryForwardMonthDelta(t *testing.T, ctx context.Context, db *sql.DB, 
 		WHERE %s AND r.global_resource_id = '%s'`, castFloatType(dialect), where, escapeSQL(resourceID))
 	var out float64
 	if err := db.QueryRowContext(ctx, q).Scan(&out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("carryforward month_realized_delta month=%s resource=%s: %v", month, resourceID, err)
 	}
 	return out
 }
@@ -227,7 +227,7 @@ func queryCarryForwardCumulative(t *testing.T, ctx context.Context, db *sql.DB, 
 		WHERE %s AND r.global_resource_id = '%s'`, castFloatType(dialect), where, escapeSQL(resourceID))
 	var out float64
 	if err := db.QueryRowContext(ctx, q).Scan(&out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("carryforward cumulative_realized_delta month=%s resource=%s: %v", month, resourceID, err)
 	}
 	return out
 }
