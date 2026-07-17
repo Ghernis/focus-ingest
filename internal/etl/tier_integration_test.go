@@ -552,7 +552,7 @@ func preflightSQLDatabaseFixture(rows []sqlDatabaseSampleRow) error {
 		if err != nil || math.IsNaN(cost) {
 			return fmt.Errorf("%s invalid cost %q", prefix, r.cost)
 		}
-		if !strings.Contains(r.skuPriceID, "DTU/Day") && !strings.Contains(r.skuPriceID, "eDTU/Day") && !strings.Contains(r.skuPriceID, "vCore Hour") {
+		if !isComputeLikeSQLSKUPriceID(r.skuPriceID) {
 			return fmt.Errorf("%s skuPriceID not compute-like: %q", prefix, r.skuPriceID)
 		}
 		if r.expectedTierCode != "" && !strings.EqualFold(strings.TrimSpace(r.expectedTierCode), strings.TrimSpace(r.skuMeter)) {
@@ -560,6 +560,20 @@ func preflightSQLDatabaseFixture(rows []sqlDatabaseSampleRow) error {
 		}
 	}
 	return nil
+}
+
+func isComputeLikeSQLSKUPriceID(s string) bool {
+	v := strings.ToLower(strings.TrimSpace(s))
+	if strings.Contains(v, "vcore hour") {
+		return true
+	}
+	if strings.Contains(v, "dtu/day") || strings.Contains(v, "dtus/day") {
+		return true
+	}
+	if strings.Contains(v, "edtu/day") || strings.Contains(v, "edtus/day") {
+		return true
+	}
+	return false
 }
 
 func importAzureVMRow(ctx context.Context, t *testing.T, s store.Store, file, chargeDate, billingMonth, resourceID, skuID, skuPriceID, skuMeter, qty, cost string) {
