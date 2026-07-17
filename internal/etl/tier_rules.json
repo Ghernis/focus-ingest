@@ -47,6 +47,14 @@
       "tier_extract_regex": "^(\\d+)\\s*vCore$",
       "tier_rank_mode": "vcore_count",
       "priority": 30
+    },
+    {
+      "provider": "AZURE",
+      "service_name": "Azure SQL Database",
+      "line_match_regex": "(?i)(DTU|vCore Hour)",
+      "tier_extract_regex": "(?i)^((?:B|S\\d+|P\\d+)\\s*DTU[s]?|(?:\\d+)\\s*DTU[s]?|eDTU[s]?|(?:\\d+)\\s*vCore|vCore)$",
+      "tier_rank_mode": "lookup",
+      "priority": 31
     }
   ],
   "ranks": [
@@ -68,6 +76,26 @@
     {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "P3v3 App", "tier_rank": 110},
     {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "I1 v2 App", "tier_rank": 120},
     {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "I2 v2 App", "tier_rank": 130},
-    {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "I3 v2 App", "tier_rank": 140}
+    {"provider": "AZURE", "service_name": "Azure App Service", "tier_code": "I3 v2 App", "tier_rank": 140},
+
+    {"provider": "AZURE", "service_name": "Azure SQL Database", "tier_code": "B DTU", "tier_rank": 10},
+    {"provider": "AZURE", "service_name": "Azure SQL Database", "tier_code": "S0 DTU", "tier_rank": 20},
+    {"provider": "AZURE", "service_name": "Azure SQL Database", "tier_code": "S0 DTUs", "tier_rank": 20},
+    {"provider": "AZURE", "service_name": "Azure SQL Database", "tier_code": "S1 DTU", "tier_rank": 30},
+    {"provider": "AZURE", "service_name": "Azure SQL Database", "tier_code": "S1 DTUs", "tier_rank": 30},
+    {"provider": "AZURE", "service_name": "Azure SQL Database", "tier_code": "S2 DTU", "tier_rank": 40},
+    {"provider": "AZURE", "service_name": "Azure SQL Database", "tier_code": "S2 DTUs", "tier_rank": 40},
+    {"provider": "AZURE", "service_name": "Azure SQL Database", "tier_code": "S3 DTU", "tier_rank": 50},
+    {"provider": "AZURE", "service_name": "Azure SQL Database", "tier_code": "S3 DTUs", "tier_rank": 50},
+    {"provider": "AZURE", "service_name": "Azure SQL Database", "tier_code": "P2 DTU", "tier_rank": 60},
+    {"provider": "AZURE", "service_name": "Azure SQL Database", "tier_code": "P2 DTUs", "tier_rank": 60},
+    {"provider": "AZURE", "service_name": "Azure SQL Database", "tier_code": "P4 DTU", "tier_rank": 70},
+    {"provider": "AZURE", "service_name": "Azure SQL Database", "tier_code": "P4 DTUs", "tier_rank": 70},
+    {"provider": "AZURE", "service_name": "Azure SQL Database", "tier_code": "10 DTU", "tier_rank": 35},
+    {"provider": "AZURE", "service_name": "Azure SQL Database", "tier_code": "10 DTUs", "tier_rank": 35},
+    {"provider": "AZURE", "service_name": "Azure SQL Database", "tier_code": "eDTU", "tier_rank": 45},
+    {"provider": "AZURE", "service_name": "Azure SQL Database", "tier_code": "eDTUs", "tier_rank": 45},
+    {"provider": "AZURE", "service_name": "Azure SQL Database", "tier_code": "vCore", "tier_rank": 80},
+    {"provider": "AZURE", "service_name": "Azure SQL Database", "tier_code": "1 vCore", "tier_rank": 80}
   ]
 }

@@ -2,8 +2,12 @@ package etl_test
 
 import (
 	"context"
+	"encoding/csv"
 	"database/sql"
+	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -359,6 +363,174 @@ func TestTierCarryForward_MultiMonthBaselineAndCumulative(t *testing.T) {
 	if cumulativeMar != 120 {
 		t.Fatalf("mar cumulative_realized_delta=%v want 120", cumulativeMar)
 	}
+}
+
+func TestTierDaily_SQLDatabaseSampleCoverage(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	path := filepath.Join(t.TempDir(), "tier_sql_db_sample.db")
+	s, err := store.OpenSQLite(path, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.ApplySchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	rows := loadSQLDatabaseSampleRows(t)
+	if len(rows) == 0 {
+		t.Fatal("expected compute-like SQL database rows from sample")
+	}
+
+	maxRows := 60
+	if len(rows) < maxRows {
+		maxRows = len(rows)
+	}
+	for i := 0; i < maxRows; i++ {
+		r := rows[i]
+		importAzureServiceRow(ctx, t, s,
+			"sql-database-sample.csv",
+			r.chargeDate,
+			r.billingMonth,
+			r.resourceID,
+			r.skuID,
+			r.skuPriceID,
+			r.skuMeter,
+			r.qty,
+			r.cost,
+			"Azure SQL Database",
+		)
+	}
+
+	if _, err := s.RebuildAggregates(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+
+	db := openTierTestDB(t, path)
+	defer db.Close()
+
+	var totalDaily int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM fact_resource_tier_daily`).Scan(&totalDaily); err != nil {
+		t.Fatal(err)
+	}
+	if totalDaily == 0 {
+		t.Fatal("expected SQL database rows in fact_resource_tier_daily")
+	}
+
+	var recognizedDaily int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM fact_resource_tier_daily d
+		INNER JOIN dim_service svc ON d.service_sk = svc.service_sk
+		WHERE svc.service_name = 'Azure SQL Database'
+		  AND d.tier_code IS NOT NULL
+		  AND TRIM(d.tier_code) <> ''`).Scan(&recognizedDaily); err != nil {
+		t.Fatal(err)
+	}
+	if recognizedDaily == 0 {
+		t.Fatal("expected recognized Azure SQL Database tier rows")
+	}
+
+	coverage := float64(recognizedDaily) / float64(totalDaily)
+	if coverage < 0.90 {
+		t.Fatalf("expected SQL database tier coverage >= 0.90, got %.4f (%d/%d)", coverage, recognizedDaily, totalDaily)
+	}
+}
+
+type sqlDatabaseSampleRow struct {
+	chargeDate  string
+	billingMonth string
+	resourceID  string
+	skuID       string
+	skuPriceID  string
+	skuMeter    string
+	qty         string
+	cost        string
+}
+
+func loadSQLDatabaseSampleRows(t *testing.T) []sqlDatabaseSampleRow {
+	t.Helper()
+
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	samplePath := filepath.Join(filepath.Dir(thisFile), "..", "..", "validate", "reconciliation_output", "sql_database_service.csv")
+
+	f, err := os.Open(samplePath)
+	if err != nil {
+		t.Fatalf("open sample csv: %v", err)
+	}
+	defer f.Close()
+
+	r := csv.NewReader(f)
+	r.FieldsPerRecord = -1
+	recs, err := r.ReadAll()
+	if err != nil {
+		t.Fatalf("read sample csv: %v", err)
+	}
+	if len(recs) < 2 {
+		return nil
+	}
+
+	head := map[string]int{}
+	for i, h := range recs[0] {
+		head[strings.TrimSpace(h)] = i
+	}
+	required := []string{"ServiceName", "SkuPriceId", "SkuMeter", "ResourceId", "SkuId", "ChargePeriodStart", "BillingPeriodStart", "PricingQuantity", "EffectiveCost"}
+	for _, col := range required {
+		if _, ok := head[col]; !ok {
+			t.Fatalf("missing column %q in sample csv", col)
+		}
+	}
+
+	out := make([]sqlDatabaseSampleRow, 0, len(recs)-1)
+	for _, rec := range recs[1:] {
+		if len(rec) == 0 {
+			continue
+		}
+		service := strings.TrimSpace(rec[head["ServiceName"]])
+		if service != "Azure SQL Database" {
+			continue
+		}
+		skuPriceID := strings.TrimSpace(rec[head["SkuPriceId"]])
+		// Only include compute-like rows that should map to a rightsize tier.
+		if !strings.Contains(skuPriceID, "DTU/Day") && !strings.Contains(skuPriceID, "eDTU/Day") && !strings.Contains(skuPriceID, "vCore Hour") {
+			continue
+		}
+		resourceID := strings.TrimSpace(rec[head["ResourceId"]])
+		skuID := strings.TrimSpace(rec[head["SkuId"]])
+		skuMeter := strings.TrimSpace(rec[head["SkuMeter"]])
+		if resourceID == "" || skuID == "" || skuPriceID == "" || skuMeter == "" {
+			continue
+		}
+		chargeDate := strings.TrimSpace(rec[head["ChargePeriodStart"]])
+		billingMonth := strings.TrimSpace(rec[head["BillingPeriodStart"]])
+		if len(chargeDate) >= 10 {
+			chargeDate = chargeDate[:10]
+		}
+		if len(billingMonth) >= 10 {
+			billingMonth = billingMonth[:10]
+		}
+		qty := strings.TrimSpace(rec[head["PricingQuantity"]])
+		cost := strings.TrimSpace(rec[head["EffectiveCost"]])
+		if qty == "" || cost == "" {
+			continue
+		}
+		out = append(out, sqlDatabaseSampleRow{
+			chargeDate:  chargeDate,
+			billingMonth: billingMonth,
+			resourceID:  resourceID,
+			skuID:       skuID,
+			skuPriceID:  skuPriceID,
+			skuMeter:    skuMeter,
+			qty:         qty,
+			cost:        cost,
+		})
+	}
+	return out
 }
 
 func importAzureVMRow(ctx context.Context, t *testing.T, s store.Store, file, chargeDate, billingMonth, resourceID, skuID, skuPriceID, skuMeter, qty, cost string) {

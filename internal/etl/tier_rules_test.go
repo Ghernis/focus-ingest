@@ -124,6 +124,42 @@ func TestTierRules_SQLMIStorageIgnored(t *testing.T) {
 	}
 }
 
+func TestTierRules_SQLDatabaseDTU(t *testing.T) {
+	resetTierRulesEngine()
+	engine, err := loadTierRulesEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	match, ok := engine.matchSKU("AZURE", "Azure SQL Database", "DZH318Z0BQHF_01ML_10 DTUs/Day", "S2 DTUs")
+	if !ok {
+		t.Fatal("expected Azure SQL Database DTU tier match")
+	}
+	if match.TierCode != "S2 DTUs" {
+		t.Fatalf("tier_code=%q", match.TierCode)
+	}
+	if match.TierRank <= 0 {
+		t.Fatalf("tier_rank=%d", match.TierRank)
+	}
+}
+
+func TestTierRules_SQLDatabaseElasticPoolEDTU(t *testing.T) {
+	resetTierRulesEngine()
+	engine, err := loadTierRulesEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	match, ok := engine.matchSKU("AZURE", "Azure SQL Database", "DZH318Z0BQHP_00LR_1 eDTU/Day", "eDTUs")
+	if !ok {
+		t.Fatal("expected Azure SQL Database eDTU tier match")
+	}
+	if match.TierCode != "eDTUs" {
+		t.Fatalf("tier_code=%q", match.TierCode)
+	}
+	if match.TierRank <= 0 {
+		t.Fatalf("tier_rank=%d", match.TierRank)
+	}
+}
+
 func TestTierRules_FallbackWithoutServiceName(t *testing.T) {
 	resetTierRulesEngine()
 	engine, err := loadTierRulesEngine()
