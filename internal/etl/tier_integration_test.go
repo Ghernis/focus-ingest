@@ -2,11 +2,11 @@ package etl_test
 
 import (
 	"context"
-	"encoding/csv"
 	"database/sql"
-	"os"
+	"fmt"
+	"math"
 	"path/filepath"
-	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -379,9 +379,12 @@ func TestTierDaily_SQLDatabaseSampleCoverage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rows := loadSQLDatabaseSampleRows(t)
+	rows := fixtureSQLDatabaseRows()
 	if len(rows) == 0 {
-		t.Fatal("expected compute-like SQL database rows from sample")
+		t.Fatal("expected SQL database fixture rows")
+	}
+	if err := preflightSQLDatabaseFixture(rows); err != nil {
+		t.Fatalf("fixture preflight failed: %v", err)
 	}
 
 	maxRows := 60
@@ -391,7 +394,7 @@ func TestTierDaily_SQLDatabaseSampleCoverage(t *testing.T) {
 	for i := 0; i < maxRows; i++ {
 		r := rows[i]
 		importAzureServiceRow(ctx, t, s,
-			"sql-database-sample.csv",
+			"sql-database-fixture.csv",
 			r.chargeDate,
 			r.billingMonth,
 			r.resourceID,
@@ -439,6 +442,66 @@ func TestTierDaily_SQLDatabaseSampleCoverage(t *testing.T) {
 	}
 }
 
+func TestTierChange_MoM_SQLDatabase_S3_to_S1(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	path := filepath.Join(t.TempDir(), "tier_sql_mom.db")
+	s, err := store.OpenSQLite(path, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.ApplySchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	rows := []sqlDatabaseSampleRow{
+		{chargeDate: "2026-01-15", billingMonth: "2026-01-01", resourceID: "sql-mom-1", skuID: "DZH318Z0BQHF", skuPriceID: "DZH318Z0BQHF_01MP_10 DTUs/Day", skuMeter: "S3 DTUs", qty: "1", cost: "4.064508", expectedTierCode: "S3 DTUs"},
+		{chargeDate: "2026-02-15", billingMonth: "2026-02-01", resourceID: "sql-mom-1", skuID: "DZH318Z0BQHF", skuPriceID: "DZH318Z0BQHF_01MQ_10 DTUs/Day", skuMeter: "S1 DTUs", qty: "1", cost: "0.812868", expectedTierCode: "S1 DTUs"},
+	}
+	if err := preflightSQLDatabaseFixture(rows); err != nil {
+		t.Fatalf("fixture preflight failed: %v", err)
+	}
+
+	for _, r := range rows {
+		importAzureServiceRow(ctx, t, s,
+			"sql-database-mom-fixture.csv",
+			r.chargeDate,
+			r.billingMonth,
+			r.resourceID,
+			r.skuID,
+			r.skuPriceID,
+			r.skuMeter,
+			r.qty,
+			r.cost,
+			"Azure SQL Database",
+		)
+	}
+
+	if _, err := s.RebuildAggregates(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+
+	db := openTierTestDB(t, path)
+	defer db.Close()
+
+	var priorTier, newTier, direction string
+	if err := db.QueryRowContext(ctx, `
+		SELECT m.prior_tier_code, m.new_tier_code, m.change_direction
+		FROM agg_resource_tier_change_monthly m
+		INNER JOIN dim_resource r ON m.resource_sk = r.resource_sk
+		WHERE m.month_start = '2026-02-01' AND r.global_resource_id = 'sql-mom-1'`).Scan(&priorTier, &newTier, &direction); err != nil {
+		t.Fatal(err)
+	}
+	if priorTier != "S3 DTUs" || newTier != "S1 DTUs" {
+		t.Fatalf("tiers %s -> %s", priorTier, newTier)
+	}
+	if direction != "DOWNSIZE" {
+		t.Fatalf("direction=%s", direction)
+	}
+}
+
 type sqlDatabaseSampleRow struct {
 	chargeDate  string
 	billingMonth string
@@ -448,89 +511,55 @@ type sqlDatabaseSampleRow struct {
 	skuMeter    string
 	qty         string
 	cost        string
+	expectedTierCode string
 }
 
-func loadSQLDatabaseSampleRows(t *testing.T) []sqlDatabaseSampleRow {
-	t.Helper()
+func fixtureSQLDatabaseRows() []sqlDatabaseSampleRow {
+	return []sqlDatabaseSampleRow{
+		{chargeDate: "2026-02-02", billingMonth: "2026-02-01", resourceID: "sql-s0", skuID: "DZH318Z0BQHF", skuPriceID: "DZH318Z0BQHF_01MK_10 DTUs/Day", skuMeter: "S0 DTUs", qty: "1", cost: "0.406476", expectedTierCode: "S0 DTUs"},
+		{chargeDate: "2026-02-03", billingMonth: "2026-02-01", resourceID: "sql-s1", skuID: "DZH318Z0BQHF", skuPriceID: "DZH318Z0BQHF_01MQ_10 DTUs/Day", skuMeter: "S1 DTUs", qty: "1", cost: "0.812868", expectedTierCode: "S1 DTUs"},
+		{chargeDate: "2026-02-04", billingMonth: "2026-02-01", resourceID: "sql-s2", skuID: "DZH318Z0BQHF", skuPriceID: "DZH318Z0BQHF_01ML_10 DTUs/Day", skuMeter: "S2 DTUs", qty: "1", cost: "2.0328", expectedTierCode: "S2 DTUs"},
+		{chargeDate: "2026-02-05", billingMonth: "2026-02-01", resourceID: "sql-s3", skuID: "DZH318Z0BQHF", skuPriceID: "DZH318Z0BQHF_01MP_10 DTUs/Day", skuMeter: "S3 DTUs", qty: "1", cost: "4.064508", expectedTierCode: "S3 DTUs"},
+		{chargeDate: "2026-02-06", billingMonth: "2026-02-01", resourceID: "sql-b", skuID: "DZH318Z0BQGZ", skuPriceID: "DZH318Z0BQGZ_006G_1 DTU/Day", skuMeter: "B DTU", qty: "1", cost: "0.13524", expectedTierCode: "B DTU"},
+		{chargeDate: "2026-02-07", billingMonth: "2026-02-01", resourceID: "sql-10dtu", skuID: "DZH318Z0BQHF", skuPriceID: "DZH318Z0BQHF_01MM_10 DTUs/Day", skuMeter: "10 DTUs", qty: "40", cost: "16.25904", expectedTierCode: "10 DTUs"},
+		{chargeDate: "2026-02-08", billingMonth: "2026-02-01", resourceID: "sql-p2", skuID: "DZH318Z0BQHC", skuPriceID: "DZH318Z0BQHC_01FP_1 DTU/Day", skuMeter: "P2 DTU", qty: "1", cost: "25.2", expectedTierCode: "P2 DTU"},
+		{chargeDate: "2026-02-09", billingMonth: "2026-02-01", resourceID: "sql-p4", skuID: "DZH318Z0BQHC", skuPriceID: "DZH318Z0BQHC_01FR_1 DTU/Day", skuMeter: "P4 DTU", qty: "1", cost: "50.4", expectedTierCode: "P4 DTU"},
+		{chargeDate: "2026-02-10", billingMonth: "2026-02-01", resourceID: "sql-edtu", skuID: "DZH318Z0BQHP", skuPriceID: "DZH318Z0BQHP_00LR_1 eDTU/Day", skuMeter: "eDTUs", qty: "400", cost: "24.36", expectedTierCode: "eDTUs"},
+		{chargeDate: "2026-02-11", billingMonth: "2026-02-01", resourceID: "sql-vcore", skuID: "DZH318Z0BQKP", skuPriceID: "DZH318Z0BQKP_00BS_1 vCore Hour", skuMeter: "vCore", qty: "48", cost: "6.13742976", expectedTierCode: "vCore"},
+	}
+}
 
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
+func preflightSQLDatabaseFixture(rows []sqlDatabaseSampleRow) error {
+	if len(rows) == 0 {
+		return fmt.Errorf("no rows provided")
 	}
-	samplePath := filepath.Join(filepath.Dir(thisFile), "..", "..", "validate", "reconciliation_output", "sql_database_service.csv")
-
-	f, err := os.Open(samplePath)
-	if err != nil {
-		t.Fatalf("open sample csv: %v", err)
-	}
-	defer f.Close()
-
-	r := csv.NewReader(f)
-	r.FieldsPerRecord = -1
-	recs, err := r.ReadAll()
-	if err != nil {
-		t.Fatalf("read sample csv: %v", err)
-	}
-	if len(recs) < 2 {
-		return nil
-	}
-
-	head := map[string]int{}
-	for i, h := range recs[0] {
-		head[strings.TrimSpace(h)] = i
-	}
-	required := []string{"ServiceName", "SkuPriceId", "SkuMeter", "ResourceId", "SkuId", "ChargePeriodStart", "BillingPeriodStart", "PricingQuantity", "EffectiveCost"}
-	for _, col := range required {
-		if _, ok := head[col]; !ok {
-			t.Fatalf("missing column %q in sample csv", col)
+	for i, r := range rows {
+		prefix := fmt.Sprintf("row[%d]", i)
+		if r.chargeDate == "" || r.billingMonth == "" || r.resourceID == "" || r.skuID == "" || r.skuPriceID == "" || r.skuMeter == "" || r.qty == "" || r.cost == "" {
+			return fmt.Errorf("%s missing required field", prefix)
+		}
+		if _, err := time.Parse("2006-01-02", r.chargeDate); err != nil {
+			return fmt.Errorf("%s invalid chargeDate %q: %w", prefix, r.chargeDate, err)
+		}
+		if _, err := time.Parse("2006-01-02", r.billingMonth); err != nil {
+			return fmt.Errorf("%s invalid billingMonth %q: %w", prefix, r.billingMonth, err)
+		}
+		qty, err := strconv.ParseFloat(r.qty, 64)
+		if err != nil || math.IsNaN(qty) || qty <= 0 {
+			return fmt.Errorf("%s invalid qty %q", prefix, r.qty)
+		}
+		cost, err := strconv.ParseFloat(r.cost, 64)
+		if err != nil || math.IsNaN(cost) {
+			return fmt.Errorf("%s invalid cost %q", prefix, r.cost)
+		}
+		if !strings.Contains(r.skuPriceID, "DTU/Day") && !strings.Contains(r.skuPriceID, "eDTU/Day") && !strings.Contains(r.skuPriceID, "vCore Hour") {
+			return fmt.Errorf("%s skuPriceID not compute-like: %q", prefix, r.skuPriceID)
+		}
+		if r.expectedTierCode != "" && !strings.EqualFold(strings.TrimSpace(r.expectedTierCode), strings.TrimSpace(r.skuMeter)) {
+			return fmt.Errorf("%s expectedTierCode %q does not match skuMeter %q", prefix, r.expectedTierCode, r.skuMeter)
 		}
 	}
-
-	out := make([]sqlDatabaseSampleRow, 0, len(recs)-1)
-	for _, rec := range recs[1:] {
-		if len(rec) == 0 {
-			continue
-		}
-		service := strings.TrimSpace(rec[head["ServiceName"]])
-		if service != "Azure SQL Database" {
-			continue
-		}
-		skuPriceID := strings.TrimSpace(rec[head["SkuPriceId"]])
-		// Only include compute-like rows that should map to a rightsize tier.
-		if !strings.Contains(skuPriceID, "DTU/Day") && !strings.Contains(skuPriceID, "eDTU/Day") && !strings.Contains(skuPriceID, "vCore Hour") {
-			continue
-		}
-		resourceID := strings.TrimSpace(rec[head["ResourceId"]])
-		skuID := strings.TrimSpace(rec[head["SkuId"]])
-		skuMeter := strings.TrimSpace(rec[head["SkuMeter"]])
-		if resourceID == "" || skuID == "" || skuPriceID == "" || skuMeter == "" {
-			continue
-		}
-		chargeDate := strings.TrimSpace(rec[head["ChargePeriodStart"]])
-		billingMonth := strings.TrimSpace(rec[head["BillingPeriodStart"]])
-		if len(chargeDate) >= 10 {
-			chargeDate = chargeDate[:10]
-		}
-		if len(billingMonth) >= 10 {
-			billingMonth = billingMonth[:10]
-		}
-		qty := strings.TrimSpace(rec[head["PricingQuantity"]])
-		cost := strings.TrimSpace(rec[head["EffectiveCost"]])
-		if qty == "" || cost == "" {
-			continue
-		}
-		out = append(out, sqlDatabaseSampleRow{
-			chargeDate:  chargeDate,
-			billingMonth: billingMonth,
-			resourceID:  resourceID,
-			skuID:       skuID,
-			skuPriceID:  skuPriceID,
-			skuMeter:    skuMeter,
-			qty:         qty,
-			cost:        cost,
-		})
-	}
-	return out
+	return nil
 }
 
 func importAzureVMRow(ctx context.Context, t *testing.T, s store.Store, file, chargeDate, billingMonth, resourceID, skuID, skuPriceID, skuMeter, qty, cost string) {
